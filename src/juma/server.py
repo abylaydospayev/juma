@@ -27,3 +27,10 @@ def ask(payload: AskRequest) -> dict:
 def health() -> dict[str, str]:
     """Report whether the HTTP service is available."""
     return {"status": "ok"}
+
+
+def main() -> None:
+    """Run the juma HTTP server locally."""
+    import uvicorn
+
+    uvicorn.run("juma.server:app", host="127.0.0.1", port=8000)

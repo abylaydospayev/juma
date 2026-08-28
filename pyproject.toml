@@ -30,6 +30,7 @@ dev = [
 [project.scripts]
 juma = "juma.cli:app"
 juma-mcp = "juma.mcp_server:main"
+juma-server = "juma.server:main"
 juma-ui = "juma.ui:launch"
 
 [tool.hatch.build.targets.wheel]
