@@ -14,6 +14,12 @@ from juma.server import (
 )
 
 client = TestClient(app)
+AUTH_HEADERS = {"Authorization": "Bearer test-token"}
+
+
+@pytest.fixture(autouse=True)
+def api_token(monkeypatch) -> None:
+    monkeypatch.setenv("JUMA_API_TOKEN", "test-token")
 
 
 def test_every_endpoint_declares_an_explicit_response_model() -> None:
@@ -82,7 +88,7 @@ def test_health_response_model_accepts_only_a_valid_shape() -> None:
 
 
 def test_ask_rejects_missing_request() -> None:
-    response = client.post("/ask", json={})
+    response = client.post("/ask", json={}, headers=AUTH_HEADERS)
 
     assert response.status_code == 422
     assert "request" in response.text
@@ -90,14 +96,17 @@ def test_ask_rejects_missing_request() -> None:
 
 @pytest.mark.parametrize("limit", [0, 201])
 def test_thread_list_rejects_invalid_limits(limit: int) -> None:
-    response = client.get(f"/threads?limit={limit}")
+    response = client.get(f"/threads?limit={limit}", headers=AUTH_HEADERS)
 
     assert response.status_code == 422
 
 
 @pytest.mark.parametrize("limit", [0, 101])
 def test_history_rejects_invalid_limits(limit: int) -> None:
-    response = client.get(f"/threads/thread-1/history?limit={limit}")
+    response = client.get(
+        f"/threads/thread-1/history?limit={limit}",
+        headers=AUTH_HEADERS,
+    )
 
     assert response.status_code == 422
 
@@ -106,6 +115,7 @@ def test_approval_rejects_invalid_fingerprint_type() -> None:
     response = client.post(
         "/threads/thread-1/approve",
         json={"action_fingerprint": {"unexpected": "object"}},
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 422

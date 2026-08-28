@@ -54,11 +54,13 @@ OPENAI_API_KEY=your-new-api-key
 JUMA_OPENAI_MODEL=gpt-5.6-luna
 JUMA_REASONING_EFFORT=medium
 JUMA_ENABLE_WEB_SEARCH=true
+JUMA_API_TOKEN=use-a-long-random-local-token
 JUMA_WORKSPACE_ROOT=C:\path\to\the\project
 ```
 
-Alternatively set `OPENAI_API_KEY` in the current PowerShell session. Never commit or paste the
-key into source files.
+Alternatively set `OPENAI_API_KEY` and `JUMA_API_TOKEN` in the current PowerShell session. Never
+commit or paste either secret into source files. The local API keeps `/health` public and requires
+the API token as a Bearer token for all other endpoints.
 
 ## Use
 
@@ -133,4 +135,4 @@ mcp dev src/juma/mcp_server.py --with-editable .
 `JUMA_DATA_DIR` moves the SQLite databases and audit log. Other optional settings are
 `JUMA_OPENAI_MODEL`, `JUMA_REASONING_EFFORT`, `JUMA_MAX_OUTPUT_TOKENS`,
 `JUMA_ENABLE_WEB_SEARCH`, `JUMA_MAX_TOOL_ROUNDS`, `JUMA_MAX_RETRIES`,
-`JUMA_REQUEST_TIMEOUT`, and `JUMA_WORKSPACE_ROOT`.
+`JUMA_REQUEST_TIMEOUT`, `JUMA_WORKSPACE_ROOT`, and `JUMA_API_TOKEN`.

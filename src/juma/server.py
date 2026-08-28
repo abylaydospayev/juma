@@ -1,8 +1,12 @@
 """HTTP server for the juma runtime."""
 
-from typing import Any
+from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Query
+import hmac
+import os
+from typing import Annotated, Any
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from .service import Juma
@@ -77,18 +81,59 @@ class HealthResponse(BaseModel):
 app = FastAPI(title="juma")
 
 
+def require_api_token(
+    authorization: Annotated[str | None, Header()] = None,
+) -> None:
+    """Require a valid bearer token for protected API routes."""
+    configured_token = os.getenv("JUMA_API_TOKEN")
+    if not configured_token:
+        raise HTTPException(
+            status_code=503,
+            detail="API authentication is not configured.",
+        )
+
+    if authorization is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Bearer token required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    scheme, separator, supplied_token = authorization.partition(" ")
+    if (
+        not separator
+        or scheme.lower() != "bearer"
+        or not supplied_token
+        or not hmac.compare_digest(supplied_token, configured_token)
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 def _bad_request(error: ValueError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(error))
 
 
-@app.post("/ask", response_model=AskResponse, response_model_exclude_none=True)
+@app.post(
+    "/ask",
+    response_model=AskResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(require_api_token)],
+)
 def ask(payload: AskRequest) -> AskResponse:
     """Run a request through Juma and return its result envelope."""
     with Juma() as juma:
         return AskResponse.model_validate(juma.ask(payload.request, thread_id=payload.thread_id))
 
 
-@app.get("/threads", response_model=list[ThreadSummary])
+@app.get(
+    "/threads",
+    response_model=list[ThreadSummary],
+    dependencies=[Depends(require_api_token)],
+)
 def list_threads(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[ThreadSummary]:
@@ -97,7 +142,11 @@ def list_threads(
         return [ThreadSummary.model_validate(thread) for thread in juma.threads(limit=limit)]
 
 
-@app.get("/threads/{thread_id}/history", response_model=list[HistoryMessage])
+@app.get(
+    "/threads/{thread_id}/history",
+    response_model=list[HistoryMessage],
+    dependencies=[Depends(require_api_token)],
+)
 def thread_history(
     thread_id: str,
     limit: int = Query(default=100, ge=1, le=100),
@@ -114,6 +163,7 @@ def thread_history(
     "/threads/{thread_id}/approve",
     response_model=ApprovalResponse,
     response_model_exclude_none=True,
+    dependencies=[Depends(require_api_token)],
 )
 def approve_thread(thread_id: str, payload: ActionRequest) -> ApprovalResponse:
     """Approve a pending action and resume its thread."""
@@ -134,6 +184,7 @@ def approve_thread(thread_id: str, payload: ActionRequest) -> ApprovalResponse:
     "/threads/{thread_id}/reject",
     response_model=RejectionResponse,
     response_model_exclude_none=True,
+    dependencies=[Depends(require_api_token)],
 )
 def reject_thread(thread_id: str, payload: ActionRequest) -> RejectionResponse:
     """Reject a pending action and resume its thread."""
@@ -154,6 +205,7 @@ def reject_thread(thread_id: str, payload: ActionRequest) -> RejectionResponse:
     "/threads/{thread_id}/rollback",
     response_model=RollbackResponse,
     response_model_exclude_none=True,
+    dependencies=[Depends(require_api_token)],
 )
 def rollback_thread(thread_id: str, payload: ActionRequest) -> RollbackResponse:
     """Roll back a failed patch after verifying its exact fingerprint."""

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from juma import server
@@ -7,6 +8,12 @@ from juma.config import Settings
 from juma.service import Juma as ServiceJuma
 
 client = TestClient(server.app)
+AUTH_HEADERS = {"Authorization": "Bearer test-token"}
+
+
+@pytest.fixture(autouse=True)
+def api_token(monkeypatch) -> None:
+    monkeypatch.setenv("JUMA_API_TOKEN", "test-token")
 
 
 class FakeJuma:
@@ -81,6 +88,7 @@ class FakeJuma:
 
 def install_fake(monkeypatch) -> None:
     FakeJuma.calls.clear()
+    monkeypatch.setenv("JUMA_API_TOKEN", "test-token")
     monkeypatch.setattr(server, "Juma", FakeJuma)
 
 
@@ -94,7 +102,11 @@ def test_health_returns_ok() -> None:
 def test_ask_forwards_request_and_thread_id(monkeypatch) -> None:
     install_fake(monkeypatch)
 
-    response = client.post("/ask", json={"request": "hello", "thread_id": "thread-1"})
+    response = client.post(
+        "/ask",
+        json={"request": "hello", "thread_id": "thread-1"},
+        headers=AUTH_HEADERS,
+    )
 
     assert response.status_code == 200
     assert response.json() == {
@@ -108,7 +120,11 @@ def test_ask_forwards_request_and_thread_id(monkeypatch) -> None:
 def test_ask_allows_omitted_thread_id(monkeypatch) -> None:
     install_fake(monkeypatch)
 
-    response = client.post("/ask", json={"request": "start a new conversation"})
+    response = client.post(
+        "/ask",
+        json={"request": "start a new conversation"},
+        headers=AUTH_HEADERS,
+    )
 
     assert response.status_code == 200
     assert response.json()["thread_id"] == "generated-thread"
@@ -118,7 +134,7 @@ def test_ask_allows_omitted_thread_id(monkeypatch) -> None:
 def test_list_threads_forwards_limit(monkeypatch) -> None:
     install_fake(monkeypatch)
 
-    response = client.get("/threads?limit=10")
+    response = client.get("/threads?limit=10", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     assert response.json() == [
@@ -130,7 +146,7 @@ def test_list_threads_forwards_limit(monkeypatch) -> None:
 def test_thread_history_forwards_thread_and_limit(monkeypatch) -> None:
     install_fake(monkeypatch)
 
-    response = client.get("/threads/thread-1/history?limit=25")
+    response = client.get("/threads/thread-1/history?limit=25", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     assert response.json() == [
@@ -154,6 +170,7 @@ def test_approve_forwards_feedback_and_fingerprint(monkeypatch) -> None:
     response = client.post(
         "/threads/thread-1/approve",
         json={"feedback": "Looks good", "action_fingerprint": "abc123"},
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 200
@@ -170,7 +187,11 @@ def test_approve_forwards_feedback_and_fingerprint(monkeypatch) -> None:
 def test_reject_forwards_feedback(monkeypatch) -> None:
     install_fake(monkeypatch)
 
-    response = client.post("/threads/thread-1/reject", json={"feedback": "Needs revision"})
+    response = client.post(
+        "/threads/thread-1/reject",
+        json={"feedback": "Needs revision"},
+        headers=AUTH_HEADERS,
+    )
 
     assert response.status_code == 200
     assert response.json()["state"] == {"approved": False, "feedback": "Needs revision"}
@@ -189,6 +210,7 @@ def test_rollback_forwards_thread_id_and_fingerprint(monkeypatch) -> None:
     response = client.post(
         "/threads/thread-1/rollback",
         json={"action_fingerprint": "abc123"},
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 200
@@ -201,10 +223,40 @@ def test_rollback_forwards_thread_id_and_fingerprint(monkeypatch) -> None:
 def test_pending_action_error_returns_bad_request(monkeypatch) -> None:
     install_fake(monkeypatch)
 
-    response = client.post("/threads/missing/approve", json={})
+    response = client.post("/threads/missing/approve", json={}, headers=AUTH_HEADERS)
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Thread 'missing' is not waiting for approval."}
+
+
+def test_health_is_public_without_authentication(monkeypatch) -> None:
+    monkeypatch.delenv("JUMA_API_TOKEN", raising=False)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_protected_endpoint_rejects_missing_authentication(monkeypatch) -> None:
+    monkeypatch.setenv("JUMA_API_TOKEN", "test-token")
+
+    response = client.get("/threads")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_protected_endpoint_rejects_invalid_authentication(monkeypatch) -> None:
+    monkeypatch.setenv("JUMA_API_TOKEN", "test-token")
+
+    response = client.get(
+        "/threads",
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid bearer token."}
 
 
 class IntegrationFakeModel:
@@ -237,6 +289,7 @@ def test_thread_lifecycle_persists_across_http_requests(
     ask_response = client.post(
         "/ask",
         json={"request": "research durable agent systems"},
+        headers=AUTH_HEADERS,
     )
 
     assert ask_response.status_code == 200
@@ -245,7 +298,10 @@ def test_thread_lifecycle_persists_across_http_requests(
     assert thread_id
     assert result["status"] == "completed"
 
-    history_response = client.get(f"/threads/{thread_id}/history")
+    history_response = client.get(
+        f"/threads/{thread_id}/history",
+        headers=AUTH_HEADERS,
+    )
 
     assert history_response.status_code == 200
     history = history_response.json()
@@ -257,7 +313,7 @@ def test_thread_lifecycle_persists_across_http_requests(
         "research answer: research durable agent systems"
     )
 
-    threads_response = client.get("/threads")
+    threads_response = client.get("/threads", headers=AUTH_HEADERS)
 
     assert threads_response.status_code == 200
     threads = threads_response.json()
