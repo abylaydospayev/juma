@@ -77,6 +77,9 @@ CREW_INSTRUCTIONS: dict[AgentName, str] = {
         "unified diff inside <juma-patch> and </juma-patch> tags. The diff must use paths relative "
         "to the workspace and must be complete enough for git apply. Never apply the patch "
         "yourself; the safety gate handles that after approval. "
+        "Every file section must start with diff --git. Represent new files with new file mode, "
+        "--- /dev/null, +++ b/path, and a valid hunk header. Never use *** Add File or *** Update "
+        "File markers. "
         "Choose the smallest conventional implementation that satisfies the request. If the "
         "requested component does not yet exist, create it with focused tests instead of asking "
         "for clarification, unless the requirements conflict. "
@@ -165,7 +168,8 @@ class OpenAIResponsesModel:
                 " Return a JSON object matching the requested code-change schema. Put the concise "
                 "answer in response and the complete plain unified diff in patch. The patch must "
                 "be directly consumable by git apply; do not include Markdown fences or prose in "
-                "the patch string. Never leave patch empty for a requested change."
+                "the patch string. Every section must begin with diff --git, including new files. "
+                "Never leave patch empty for a requested change."
             )
         text_format = self._patch_response_format() if structured_patch else None
 

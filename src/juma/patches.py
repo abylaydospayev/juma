@@ -78,16 +78,30 @@ class PatchManager:
         return paths
 
     def validate(self, patch: str) -> list[str]:
-        files = self.files(patch)
-        completed = subprocess.run(
-            ["git", "apply", "--check", "--whitespace=nowarn", "-"],
-            cwd=self.root,
-            input=patch,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
+        non_git_markers = (
+            "*** Begin Patch",
+            "*** End Patch",
+            "*** Add File:",
+            "*** Update File:",
+            "*** Delete File:",
         )
+        if any(line.startswith(non_git_markers) for line in patch.splitlines()):
+            raise PatchError(
+                "The patch mixes Git unified diff content with unsupported apply-patch markers."
+            )
+        files = self.files(patch)
+        try:
+            completed = subprocess.run(
+                ["git", "apply", "--check", "--whitespace=nowarn", "-"],
+                cwd=self.root,
+                input=patch,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise PatchError(f"Git could not validate the patch: {exc}") from exc
         if completed.returncode:
             detail = (completed.stderr or completed.stdout).strip()
             raise PatchError(f"Git rejected the patch: {detail}")

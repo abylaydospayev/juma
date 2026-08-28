@@ -59,6 +59,18 @@ class RetryPatchModel:
         return "<juma-patch>\n" + PATCH + "</juma-patch>"
 
 
+class MalformedThenValidPatchModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, crew, request, *, proposed_action=None) -> str:
+        self.calls += 1
+        if self.calls == 1:
+            malformed = PATCH + "*** Add File: extra.py\n+value = 3\n"
+            return "<juma-patch>\n" + malformed + "</juma-patch>"
+        return "<juma-patch>\n" + PATCH + "</juma-patch>"
+
+
 def test_coding_crew_repairs_a_missing_patch(tmp_path: Path) -> None:
     repository(tmp_path)
     model = RetryPatchModel()
@@ -66,6 +78,17 @@ def test_coding_crew_repairs_a_missing_patch(tmp_path: Path) -> None:
         paused = juma.ask("fix the code in target.py", thread_id="retry-thread")
 
     assert paused["status"] == "waiting_approval"
+    assert model.calls == 2
+
+
+def test_coding_crew_repairs_a_malformed_patch_before_approval(tmp_path: Path) -> None:
+    repository(tmp_path)
+    model = MalformedThenValidPatchModel()
+    with Juma(settings(tmp_path), model=model) as juma:
+        paused = juma.ask("fix the code in target.py", thread_id="repair-thread")
+
+    assert paused["status"] == "waiting_approval"
+    assert paused["interrupts"][0]["action"]["parameters"]["files"] == ["target.py"]
     assert model.calls == 2
 
 
