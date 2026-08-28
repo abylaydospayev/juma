@@ -194,10 +194,23 @@ class PatchManager:
                 header += "new file mode 100644\n"
             elif operation == "delete":
                 header += "deleted file mode 100644\n"
-            sections.append(header + "".join(diff))
+            sections.append(header + self._complete_diff_lines(diff))
         if not sections:
             raise PatchError("The proposed file changes do not modify the workspace.")
         return "".join(sections)
+
+    @staticmethod
+    def _complete_diff_lines(lines: Any) -> str:
+        """Preserve missing final newlines without corrupting the next diff section."""
+        completed: list[str] = []
+        for line in lines:
+            if line.endswith("\n"):
+                completed.append(line)
+                continue
+            completed.append(line + "\n")
+            if line.startswith(("+", "-", " ")):
+                completed.append("\\ No newline at end of file\n")
+        return "".join(completed)
 
     def _validate_path(self, relative_path: str) -> None:
         if not relative_path or relative_path in {".", ".."}:

@@ -112,13 +112,14 @@ def test_patch_manager_builds_exact_git_diff_from_file_contents(tmp_path: Path) 
 
     patch = manager.from_file_changes(
         [
+            {"path": "new.py", "operation": "upsert", "content": "answer = 42"},
             {"path": "target.py", "operation": "upsert", "content": "value = 2\n"},
-            {"path": "new.py", "operation": "upsert", "content": "answer = 42\n"},
         ]
     )
 
     assert "*** Add File" not in patch
-    assert manager.validate(patch) == ["target.py", "new.py"]
+    assert "\\ No newline at end of file" in patch
+    assert manager.validate(patch) == ["new.py", "target.py"]
 
 
 def test_patch_requires_approval_and_exposes_rollback(tmp_path: Path) -> None:
