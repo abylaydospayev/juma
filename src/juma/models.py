@@ -377,7 +377,9 @@ class OpenAIResponsesModel:
             return output
         if not isinstance(payload, dict):
             return output
-        answer = str(payload.get("response", "")).strip()
+        answer = OpenAIResponsesModel._clean_patch_response_text(
+            str(payload.get("response", ""))
+        )
         if "changes" in payload:
             patch = PatchManager(workspace.root).from_file_changes(payload["changes"])
         elif "patch" in payload:
@@ -387,6 +389,20 @@ class OpenAIResponsesModel:
         if not patch:
             return answer
         return f"{answer}\n\n<juma-patch>\n{patch}\n</juma-patch>".strip()
+
+    @staticmethod
+    def _clean_patch_response_text(answer: str) -> str:
+        """Keep model commentary separate from the runtime-generated patch."""
+        tagged_start = re.search(r"<juma-patch>", answer, re.IGNORECASE)
+        if tagged_start:
+            answer = answer[: tagged_start.start()]
+        fenced_start = re.search(r"```(?:diff|patch)?\s*\n", answer, re.IGNORECASE)
+        if fenced_start:
+            answer = answer[: fenced_start.start()]
+        diff_start = answer.find("diff --git ")
+        if diff_start >= 0:
+            answer = answer[:diff_start]
+        return answer.strip()
 
     @staticmethod
     def _current_request(request: str) -> str:
