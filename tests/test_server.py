@@ -32,7 +32,18 @@ class FakeJuma:
 
     def history(self, thread_id: str, *, limit: int = 100) -> list[dict]:
         self.calls.append(("history", (thread_id,), {"limit": limit}))
-        return [{"thread_id": thread_id, "role": "user", "content": "hello"}]
+        return [
+            {
+                "id": 1,
+                "thread_id": thread_id,
+                "role": "user",
+                "content": "hello",
+                "agent": None,
+                "status": None,
+                "metadata": {},
+                "created_at": "now",
+            }
+        ]
 
     def resume(
         self,
@@ -120,7 +131,18 @@ def test_thread_history_forwards_thread_and_limit(monkeypatch) -> None:
     response = client.get("/threads/thread-1/history?limit=25")
 
     assert response.status_code == 200
-    assert response.json() == [{"thread_id": "thread-1", "role": "user", "content": "hello"}]
+    assert response.json() == [
+        {
+            "id": 1,
+            "thread_id": "thread-1",
+            "role": "user",
+            "content": "hello",
+            "agent": None,
+            "status": None,
+            "metadata": {},
+            "created_at": "now",
+        }
+    ]
     assert FakeJuma.calls == [("history", ("thread-1",), {"limit": 25})]
 
 
