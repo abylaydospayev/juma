@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "juma"
+version = "0.1.0"
+description = "A small, hierarchical multi-agent system with durable human approval."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "langgraph>=1.2,<2",
+  "langgraph-checkpoint-sqlite>=3.1,<4",
+  "mcp[cli]>=2.1,<3",
+  "openai>=3.5,<4",
+  "python-dotenv>=1.2,<2",
+  "rich>=14,<15",
+  "streamlit>=1.55,<2",
+  "typer>=0.20,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<10",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+juma = "juma.cli:app"
+juma-mcp = "juma.mcp_server:main"
+juma-ui = "juma.ui:launch"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/juma"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
