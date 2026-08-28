@@ -109,7 +109,11 @@ class ToolThenStructuredPatchResponses:
 
 
 class StructuredFileChangesResponses:
+    def __init__(self) -> None:
+        self.calls = []
+
     def create(self, **kwargs):
+        self.calls.append(kwargs)
         return SimpleNamespace(
             output_text=(
                 '{"response":"I prepared the requested change.","changes":['
@@ -249,16 +253,15 @@ def test_openai_adapter_builds_diff_from_structured_file_contents(tmp_path: Path
         tmp_path / "memory.sqlite",
         workspace_root=tmp_path,
     )
-    model = OpenAIResponsesModel(
-        settings,
-        client=SimpleNamespace(responses=StructuredFileChangesResponses()),
-    )
+    responses = StructuredFileChangesResponses()
+    model = OpenAIResponsesModel(settings, client=SimpleNamespace(responses=responses))
 
     output = model.generate("coding", "add a health endpoint")
 
     assert "diff --git a/src/app.py b/src/app.py" in output
     assert "--- /dev/null" in output
     assert "+++ b/src/app.py" in output
+    assert responses.calls[0]["max_output_tokens"] >= 12_000
 
 
 def test_openai_adapter_discards_model_embedded_patch_in_structured_response(

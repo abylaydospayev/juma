@@ -106,6 +106,8 @@ CREW_INSTRUCTIONS: dict[AgentName, str] = {
 class OpenAIResponsesModel:
     """OpenAI Responses API adapter used by all juma crews."""
 
+    PATCH_OUTPUT_TOKEN_FLOOR = 12_000
+
     def __init__(self, settings: Settings, *, client: Any | None = None):
         self.settings = settings
         self._client = client
@@ -291,7 +293,12 @@ class OpenAIResponsesModel:
             "instructions": instructions,
             "input": input,
             "reasoning": {"effort": self.settings.openai_reasoning_effort},
-            "max_output_tokens": self.settings.openai_max_output_tokens,
+            "max_output_tokens": max(
+                self.settings.openai_max_output_tokens,
+                self.PATCH_OUTPUT_TOKEN_FLOOR
+                if text_format and text_format.get("name") == "juma_code_change"
+                else 0,
+            ),
         }
         if tools:
             arguments["tools"] = tools
