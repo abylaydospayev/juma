@@ -43,9 +43,10 @@ def build_coding_crew(model: ModelClient, patch_manager: PatchManager | None = N
             )
             patch = PatchManager.extract(response)
         if not patch and _is_change_request(state["request"]):
+            excerpt = " ".join(response.strip().split())[:600]
             raise PatchGenerationError(
                 "The coding crew did not return a unified patch for the requested change. "
-                "No files were modified."
+                f"No files were modified. Last model response: {excerpt or '[empty]'}"
             )
         action = (
             patch_action(state["request"], patch, patch_manager.files(patch))

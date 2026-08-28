@@ -169,13 +169,13 @@ class OpenAIResponsesModel:
             )
         text_format = self._patch_response_format() if structured_patch else None
 
+        transcript: list[Any] = [{"role": "user", "content": request}]
         response = self._create_response(
             instructions=instructions,
             input=request,
             tools=tools,
             text_format=text_format,
         )
-        transcript: list[Any] = []
         calls: list[Any] = []
         for _ in range(max(1, self.settings.max_tool_rounds)):
             calls = [

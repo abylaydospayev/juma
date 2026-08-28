@@ -81,6 +81,33 @@ class StructuredPatchResponses:
         )
 
 
+class ToolThenStructuredPatchResponses:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            return SimpleNamespace(
+                output=[
+                    SimpleNamespace(
+                        type="function_call",
+                        name="list_files",
+                        arguments='{"directory":""}',
+                        call_id="call-patch-1",
+                    )
+                ],
+                output_text="",
+            )
+        return SimpleNamespace(
+            output=[],
+            output_text=(
+                '{"response":"I prepared the requested change.",'
+                '"patch":"--- a/src/app.py\\n+++ b/src/app.py\\n@@ -1 +1 @@\\n-old\\n+new"}'
+            ),
+        )
+
+
 def test_openai_responses_adapter_uses_luna(tmp_path: Path) -> None:
     settings = Settings(
         tmp_path,
@@ -160,3 +187,22 @@ def test_openai_adapter_normalizes_structured_coding_patch(tmp_path: Path) -> No
     assert "I prepared the requested change." in output
     assert "<juma-patch>" in output
     assert "--- a/src/app.py" in output
+
+
+def test_openai_adapter_preserves_request_across_tool_rounds(tmp_path: Path) -> None:
+    settings = Settings(
+        tmp_path,
+        tmp_path / "checkpoints.sqlite",
+        tmp_path / "memory.sqlite",
+        workspace_root=tmp_path,
+    )
+    responses = ToolThenStructuredPatchResponses()
+    model = OpenAIResponsesModel(settings, client=SimpleNamespace(responses=responses))
+
+    output = model.generate("coding", "add a health endpoint")
+
+    assert "<juma-patch>" in output
+    assert responses.calls[1]["input"][0] == {
+        "role": "user",
+        "content": "add a health endpoint",
+    }
