@@ -35,6 +35,7 @@ class Juma:
             self.model,
             self.memory,
             self.patch_manager,
+            settings=self.settings,
         )
 
     @staticmethod

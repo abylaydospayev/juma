@@ -39,6 +39,9 @@ class PatchResult(TypedDict):
     pre_apply_hashes: NotRequired[dict[str, str | None]]
     post_apply_hashes: NotRequired[dict[str, str | None]]
     restored_hashes: NotRequired[dict[str, str | None]]
+    repair_attempts: NotRequired[list[dict]]
+    branch: NotRequired[str]
+    commit: NotRequired[dict]
     test: NotRequired[dict]
     error: NotRequired[str]
 

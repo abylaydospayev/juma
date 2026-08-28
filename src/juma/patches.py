@@ -25,6 +25,179 @@ class PatchManager:
     def cwd(cls) -> PatchManager:
         return cls(Path.cwd())
 
+    def prepare_autonomous_branch(self, fingerprint: str) -> dict[str, Any]:
+        """Create a clean, dedicated branch for an autonomous coding run."""
+        if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            return {"status": "branch_failed", "error": "Invalid patch fingerprint."}
+        try:
+            clean = subprocess.run(
+                ["git", "status", "--porcelain", "--untracked-files=all"],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if clean.returncode:
+                detail = (clean.stderr or clean.stdout).strip()
+                return {"status": "branch_failed", "error": detail}
+            if clean.stdout.strip():
+                return {
+                    "status": "branch_failed",
+                    "error": "Autonomous runs require a clean Git working tree.",
+                }
+
+            current = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if current.returncode:
+                detail = (current.stderr or current.stdout).strip()
+                return {"status": "branch_failed", "error": detail}
+            branch = f"juma/auto/{fingerprint}"
+            current_branch = current.stdout.strip()
+            if current_branch == branch:
+                return {"status": "ready", "branch": branch}
+            if current_branch.startswith("juma/auto/"):
+                return {
+                    "status": "branch_failed",
+                    "error": f"Already on a different autonomous branch: {current_branch}.",
+                }
+            existing = subprocess.run(
+                ["git", "show-ref", "--verify", f"refs/heads/{branch}"],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if existing.returncode == 0:
+                return {
+                    "status": "branch_failed",
+                    "error": f"Autonomous branch already exists: {branch}.",
+                }
+            switched = subprocess.run(
+                ["git", "switch", "--create", branch],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if switched.returncode:
+                detail = (switched.stderr or switched.stdout).strip()
+                return {"status": "branch_failed", "error": detail}
+            return {"status": "ready", "branch": branch}
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"status": "branch_failed", "error": str(exc)}
+
+    def file_contents(self, files: list[str]) -> dict[str, str | None]:
+        """Capture UTF-8 contents for files before an autonomous change."""
+        contents: dict[str, str | None] = {}
+        for relative_path in files:
+            self._validate_path(relative_path)
+            target = self.root / relative_path
+            if not target.is_file():
+                contents[relative_path] = None
+                continue
+            try:
+                contents[relative_path] = target.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise PatchError(f"Cannot read {relative_path}: {exc}") from exc
+        return contents
+
+    def file_hashes(self, files: list[str]) -> dict[str, str | None]:
+        """Return SHA-256 hashes for the selected workspace files."""
+        for relative_path in files:
+            self._validate_path(relative_path)
+        return self._file_hashes(files)
+
+    def commit(
+        self,
+        files: list[str],
+        message: str,
+        *,
+        expected_branch: str | None = None,
+    ) -> dict[str, Any]:
+        """Commit only the approved run's files on its autonomous branch."""
+        try:
+            for relative_path in files:
+                self._validate_path(relative_path)
+            branch = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            current_branch = branch.stdout.strip()
+            if branch.returncode or not current_branch.startswith("juma/auto/"):
+                return {
+                    "status": "commit_failed",
+                    "error": "Automatic commits are allowed only on a juma/auto branch.",
+                }
+            if expected_branch is not None and current_branch != expected_branch:
+                return {
+                    "status": "commit_failed",
+                    "error": f"The autonomous branch changed unexpectedly: {current_branch}.",
+                }
+            staged = subprocess.run(
+                ["git", "add", "--", *files],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if staged.returncode:
+                detail = (staged.stderr or staged.stdout).strip()
+                return {"status": "commit_failed", "error": detail}
+            check = subprocess.run(
+                ["git", "diff", "--cached", "--check"],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if check.returncode:
+                detail = (check.stderr or check.stdout).strip()
+                return {"status": "commit_failed", "error": detail}
+            committed = subprocess.run(
+                ["git", "commit", "-m", message.strip() or "juma: apply approved change"],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if committed.returncode:
+                detail = (committed.stderr or committed.stdout).strip()
+                return {"status": "commit_failed", "error": detail}
+            revision = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if revision.returncode:
+                detail = (revision.stderr or revision.stdout).strip()
+                return {"status": "commit_failed", "error": detail}
+            return {
+                "status": "committed",
+                "branch": current_branch,
+                "revision": revision.stdout.strip(),
+            }
+        except (OSError, subprocess.SubprocessError, PatchError) as exc:
+            return {"status": "commit_failed", "error": str(exc)}
+
     @staticmethod
     def extract(response: str) -> str | None:
         tagged = re.search(
@@ -277,6 +450,39 @@ class PatchManager:
             sections.append(header + self._complete_diff_lines(diff))
         if not sections:
             raise PatchError("The proposed file changes do not modify the workspace.")
+        return "".join(sections)
+
+    def from_file_snapshots(self, snapshots: dict[str, str | None]) -> str:
+        """Build a diff from captured baseline contents to current file contents."""
+        sections: list[str] = []
+        for relative_path, old_content in snapshots.items():
+            self._validate_path(relative_path)
+            target = self.root / relative_path
+            existed = old_content is not None
+            current_exists = target.is_file()
+            try:
+                new_content = target.read_text(encoding="utf-8") if current_exists else ""
+            except (OSError, UnicodeDecodeError) as exc:
+                raise PatchError(f"Cannot read {relative_path}: {exc}") from exc
+            if existed == current_exists and old_content == new_content:
+                continue
+            from_path = f"a/{relative_path}" if existed else "/dev/null"
+            to_path = f"b/{relative_path}" if current_exists else "/dev/null"
+            diff = difflib.unified_diff(
+                (old_content or "").splitlines(keepends=True),
+                new_content.splitlines(keepends=True),
+                fromfile=from_path,
+                tofile=to_path,
+                lineterm="\n",
+            )
+            header = f"diff --git a/{relative_path} b/{relative_path}\n"
+            if not existed:
+                header += "new file mode 100644\n"
+            elif not current_exists:
+                header += "deleted file mode 100644\n"
+            sections.append(header + self._complete_diff_lines(diff))
+        if not sections:
+            raise PatchError("The current files match the captured baseline.")
         return "".join(sections)
 
     @staticmethod

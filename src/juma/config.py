@@ -20,6 +20,9 @@ class Settings:
     max_retries: int = 2
     request_timeout: float = 120.0
     workspace_root: Path | None = None
+    auto_repair: bool = False
+    max_repair_attempts: int = 3
+    auto_commit: bool = False
 
     @property
     def resolved_workspace_root(self) -> Path:
@@ -50,6 +53,11 @@ class Settings:
                 if os.getenv("JUMA_WORKSPACE_ROOT")
                 else None
             ),
+            auto_repair=os.getenv("JUMA_AUTO_REPAIR", "false").lower()
+            in {"1", "true", "yes", "on"},
+            max_repair_attempts=max(0, int(os.getenv("JUMA_MAX_REPAIR_ATTEMPTS", "3"))),
+            auto_commit=os.getenv("JUMA_AUTO_COMMIT", "false").lower()
+            in {"1", "true", "yes", "on"},
         )
 
     def ensure_directories(self) -> None:

@@ -15,6 +15,33 @@ PATCH = """diff --git a/target.py b/target.py
 +value = 2
 """
 
+BROKEN_PATCH = """diff --git a/target.py b/target.py
+--- a/target.py
++++ b/target.py
+@@ -1,2 +1,2 @@
+ def value():
+-    return 1
++    return 3
+"""
+
+REPAIR_PATCH = """diff --git a/target.py b/target.py
+--- a/target.py
++++ b/target.py
+@@ -1,2 +1,2 @@
+ def value():
+-    return 3
++    return 2
+"""
+
+STILL_BROKEN_PATCH = """diff --git a/target.py b/target.py
+--- a/target.py
++++ b/target.py
+@@ -1,2 +1,2 @@
+ def value():
+-    return 3
++    return 4
+"""
+
 
 def git(*args: str, cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
@@ -24,6 +51,23 @@ def repository(tmp_path: Path) -> None:
     (tmp_path / "target.py").write_text("value = 1\n", encoding="utf-8")
     (tmp_path / "test_smoke.py").write_text(
         "from target import value\n\n\ndef test_value():\n    assert value == 1\n",
+        encoding="utf-8",
+    )
+    git("init", cwd=tmp_path)
+    git("config", "user.email", "juma@example.invalid", cwd=tmp_path)
+    git("config", "user.name", "juma tests", cwd=tmp_path)
+    git("add", ".", cwd=tmp_path)
+    git("commit", "-m", "baseline", cwd=tmp_path)
+
+
+def repair_repository(tmp_path: Path) -> None:
+    (tmp_path / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+    (tmp_path / "target.py").write_text(
+        "def value():\n    return 1\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "test_smoke.py").write_text(
+        "from target import value\n\n\ndef test_value():\n    assert value() in {1, 2}\n",
         encoding="utf-8",
     )
     git("init", cwd=tmp_path)
@@ -69,6 +113,23 @@ class MalformedThenValidPatchModel:
             malformed = PATCH + "*** Add File: extra.py\n+value = 3\n"
             return "<juma-patch>\n" + malformed + "</juma-patch>"
         return "<juma-patch>\n" + PATCH + "</juma-patch>"
+
+
+class AutoRepairModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, crew, request, *, proposed_action=None) -> str:
+        self.calls += 1
+        patch = BROKEN_PATCH if self.calls == 1 else REPAIR_PATCH
+        return "<juma-patch>\n" + patch + "</juma-patch>"
+
+
+class ExhaustedAutoRepairModel(AutoRepairModel):
+    def generate(self, crew, request, *, proposed_action=None) -> str:
+        self.calls += 1
+        patch = BROKEN_PATCH if self.calls == 1 else STILL_BROKEN_PATCH
+        return "<juma-patch>\n" + patch + "</juma-patch>"
 
 
 def test_coding_crew_repairs_a_missing_patch(tmp_path: Path) -> None:
@@ -196,3 +257,91 @@ def test_patch_requires_approval_and_exposes_rollback(tmp_path: Path) -> None:
 
         with pytest.raises(ValueError, match="No failed patch"):
             juma.rollback("patch-thread")
+
+
+def test_autonomous_repair_commits_only_after_tests_pass(tmp_path: Path) -> None:
+    repair_repository(tmp_path)
+    data_dir = tmp_path.parent / f"{tmp_path.name}-runtime"
+    auto_settings = Settings(
+        data_dir,
+        data_dir / "checkpoints.sqlite",
+        data_dir / "memory.sqlite",
+        workspace_root=tmp_path,
+        auto_repair=True,
+        max_repair_attempts=2,
+        auto_commit=True,
+    )
+    model = AutoRepairModel()
+
+    with Juma(auto_settings, model=model) as juma:
+        paused = juma.ask("fix the code in target.py", thread_id="auto-thread")
+        fingerprint = paused["interrupts"][0]["action"]["fingerprint"]
+        finished = juma.resume(
+            "auto-thread",
+            approved=True,
+            action_fingerprint=fingerprint,
+        )
+
+    assert model.calls == 2
+    assert finished["status"] == "completed"
+    assert finished["state"]["patch_result"]["status"] == "applied_tests_passed"
+    assert finished["state"]["patch_result"]["repair_attempts"][0]["status"] == (
+        "applied_tests_passed"
+    )
+    assert finished["state"]["patch_result"]["commit"]["status"] == "committed"
+    assert finished["state"]["proposed_action"]["fingerprint"] != fingerprint
+    assert (tmp_path / "target.py").read_text(encoding="utf-8") == (
+        "def value():\n    return 2\n"
+    )
+    assert subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout == ""
+    assert subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip().startswith("juma/auto/")
+
+
+def test_autonomous_repair_stops_at_limit_and_preserves_rollback(tmp_path: Path) -> None:
+    repair_repository(tmp_path)
+    data_dir = tmp_path.parent / f"{tmp_path.name}-runtime"
+    auto_settings = Settings(
+        data_dir,
+        data_dir / "checkpoints.sqlite",
+        data_dir / "memory.sqlite",
+        workspace_root=tmp_path,
+        auto_repair=True,
+        max_repair_attempts=1,
+        auto_commit=True,
+    )
+    model = ExhaustedAutoRepairModel()
+
+    with Juma(auto_settings, model=model) as juma:
+        paused = juma.ask("fix the code in target.py", thread_id="limited-auto-thread")
+        fingerprint = paused["interrupts"][0]["action"]["fingerprint"]
+        finished = juma.resume(
+            "limited-auto-thread",
+            approved=True,
+            action_fingerprint=fingerprint,
+        )
+
+        assert model.calls == 2
+        assert finished["state"]["patch_result"]["status"] == "applied_tests_failed"
+        assert len(finished["state"]["patch_result"]["repair_attempts"]) == 1
+        assert "commit" not in finished["state"]["patch_result"]
+        rolled_back = juma.rollback(
+            "limited-auto-thread",
+            action_fingerprint=fingerprint,
+        )
+
+    assert rolled_back["status"] == "completed"
+    assert (tmp_path / "target.py").read_text(encoding="utf-8") == (
+        "def value():\n    return 1\n"
+    )

@@ -136,3 +136,10 @@ mcp dev src/juma/mcp_server.py --with-editable .
 `JUMA_OPENAI_MODEL`, `JUMA_REASONING_EFFORT`, `JUMA_MAX_OUTPUT_TOKENS`,
 `JUMA_ENABLE_WEB_SEARCH`, `JUMA_MAX_TOOL_ROUNDS`, `JUMA_MAX_RETRIES`,
 `JUMA_REQUEST_TIMEOUT`, `JUMA_WORKSPACE_ROOT`, and `JUMA_API_TOKEN`.
+
+Autonomous repair is off by default. To enable a bounded local repair-and-commit workflow, use a
+clean Git checkout and set `JUMA_AUTO_REPAIR=true`, `JUMA_MAX_REPAIR_ATTEMPTS=3`, and
+`JUMA_AUTO_COMMIT=true`. Juma creates a `juma/auto/<fingerprint>` branch, applies the approved
+patch, sends failing test output back to the coding crew, and retries only within the original file
+scope. It commits only after tests pass; it never pushes or deploys. If the retry limit is reached,
+the failed patch remains available for fingerprint-protected rollback.
