@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from juma.config import Settings
+from juma.identity import CREATOR_NAME, JUMA_IDENTITY
 from juma.models import OpenAIResponsesModel
 
 
@@ -163,6 +164,10 @@ def test_openai_responses_adapter_uses_luna(tmp_path: Path) -> None:
     assert responses.arguments["reasoning"] == {"effort": "medium"}
     assert responses.arguments["input"] == "Explain agent memory"
     assert responses.arguments["tools"][0]["type"] == "web_search"
+    assert CREATOR_NAME in responses.arguments["instructions"]
+    assert responses.arguments["instructions"].startswith(JUMA_IDENTITY)
+    assert "Take initiative" in responses.arguments["instructions"]
+    assert "situational awareness" in responses.arguments["instructions"]
 
 
 def test_openai_adapter_supports_structured_routing(tmp_path: Path) -> None:

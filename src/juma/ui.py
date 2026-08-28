@@ -8,6 +8,7 @@ from typing import Any
 
 import streamlit as st
 
+from juma.identity import CREATOR_NAME, JUMA_NAME, TAGLINE
 from juma.models import JumaModelError
 from juma.service import Juma
 
@@ -203,8 +204,9 @@ def open_thread(thread_id: str) -> None:
 
 def sidebar() -> None:
     with st.sidebar:
-        st.header("juma")
-        st.caption("Personal AI OS")
+        st.header(JUMA_NAME)
+        st.caption("Personal command assistant")
+        st.caption(f"Created by {CREATOR_NAME}")
         st.code(st.session_state.thread_id, language=None)
         if st.button("New conversation", use_container_width=True):
             reset_chat()
@@ -249,7 +251,7 @@ def sidebar() -> None:
 
 
 def app() -> None:
-    st.set_page_config(page_title="juma", page_icon="J", layout="wide")
+    st.set_page_config(page_title=JUMA_NAME, page_icon="J", layout="wide")
     initialize()
     st.markdown(
         """
@@ -262,8 +264,8 @@ def app() -> None:
     )
     sidebar()
 
-    st.title("juma")
-    st.caption("One request, one crew, clear boundaries.")
+    st.title(JUMA_NAME)
+    st.caption(TAGLINE)
 
     if not st.session_state.messages:
         st.info("Ask juma to research, code, or organize something.")

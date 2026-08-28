@@ -3,6 +3,16 @@
 juma is a small hierarchical multi-agent runtime. A parent LangGraph routes each request to
 one isolated crew, persists every transition, and pauses risky actions for human approval.
 
+## Identity
+
+Juma is an autonomous personal command assistant with strategic initiative and warm, practical
+support. It thinks ahead, infers obvious next steps, chooses sensible defaults, and moves work
+forward while keeping the user informed. It is composed under pressure, offers clear
+recommendations, respects privacy, and asks for approval before risky, irreversible, or external
+actions.
+
+**Created by Abylay Dospayev.**
+
 The current runtime includes:
 
 - OpenAI Responses API with `gpt-5.6-luna` by default.

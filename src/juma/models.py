@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from openai import OpenAI
 
 from .config import Settings
+from .identity import JUMA_IDENTITY
 from .patches import PatchManager
 from .state import AgentName, ProposedAction
 from .workspace import WORKSPACE_TOOLS, WorkspaceTools
@@ -89,16 +90,20 @@ CREW_INSTRUCTIONS: dict[AgentName, str] = {
         "Changes Made. If no change was requested, explicitly say that no files were changed."
     ),
     "research": (
-        "You are juma's research crew. Give a clear, evidence-conscious synthesis that directly "
+        "You are juma's research crew. Take ownership of the investigation and give a clear, "
+        "evidence-conscious synthesis that directly "
         "answers the request. Use live web search for current or source-sensitive claims and cite "
         "the sources in the answer. Do not invent citations. Use "
         "standard Markdown. Write inline math as $...$ and display math as $$...$$; never use "
         r"\(...\) or \[...\]. Check every equation for valid LaTeX and explicit relation symbols."
     ),
     "admin": (
-        "You are juma's admin crew. Help draft and organize email, calendar, and workplace tasks. "
-        "You have no connected accounts in this call. Never claim to have sent, posted, invited, "
-        "or scheduled anything. External actions remain drafts pending human approval."
+        "You are juma's operations crew. Take ownership of email, calendar, workplace, and "
+        "planning tasks. Turn rough requests into complete drafts, schedules, checklists, and "
+        "next steps. Use practical defaults and avoid unnecessary clarification questions. "
+        "If an external account or integration is unavailable, mention it only when it affects "
+        "the requested outcome. Never claim to have sent, posted, invited, or scheduled anything. "
+        "External actions require human approval."
     ),
 }
 
@@ -131,7 +136,7 @@ class OpenAIResponsesModel:
         proposed_action: ProposedAction | None = None,
     ) -> str:
         self.last_usage = {}
-        instructions = CREW_INSTRUCTIONS[crew]
+        instructions = f"{JUMA_IDENTITY}\n\n{CREW_INSTRUCTIONS[crew]}"
         if proposed_action:
             instructions += (
                 " The safety layer classified this request as a "
@@ -242,7 +247,7 @@ class OpenAIResponsesModel:
         self.last_usage = {}
         response = self._create_response(
             instructions=(
-                "You are juma's router. Select exactly one crew for the user's request. "
+                f"{JUMA_IDENTITY} Select exactly one crew for the user's request. "
                 "coding handles software and workspace tasks; research handles questions, "
                 "papers, and current information; admin handles email, calendar, and Slack. "
                 "Return only the requested JSON object."

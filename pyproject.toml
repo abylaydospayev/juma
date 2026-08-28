@@ -5,7 +5,8 @@ build-backend = "hatchling.build"
 [project]
 name = "juma"
 version = "0.1.0"
-description = "A small, hierarchical multi-agent system with durable human approval."
+description = "A calm personal command assistant with durable human approval."
+authors = [{ name = "Abylay Dospayev" }]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
