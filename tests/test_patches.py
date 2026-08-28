@@ -122,6 +122,21 @@ def test_patch_manager_builds_exact_git_diff_from_file_contents(tmp_path: Path) 
     assert manager.validate(patch) == ["new.py", "target.py"]
 
 
+def test_patch_extraction_preserves_trailing_blank_context(tmp_path: Path) -> None:
+    repository(tmp_path)
+    target = tmp_path / "target.py"
+    target.write_text("value = 1\n\n", encoding="utf-8")
+    manager = PatchManager(tmp_path)
+    patch = manager.from_file_changes(
+        [{"path": "target.py", "operation": "upsert", "content": "value = 2\n\n"}]
+    )
+
+    extracted = manager.extract(f"Summary\n<juma-patch>\n{patch}</juma-patch>")
+
+    assert extracted == patch
+    assert manager.validate(extracted) == ["target.py"]
+
+
 def test_patch_requires_approval_and_exposes_rollback(tmp_path: Path) -> None:
     repository(tmp_path)
     with Juma(settings(tmp_path), model=PatchModel()) as juma:

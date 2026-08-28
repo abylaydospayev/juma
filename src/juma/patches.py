@@ -27,19 +27,19 @@ class PatchManager:
     @staticmethod
     def extract(response: str) -> str | None:
         tagged = re.search(
-            r"<juma-patch>\s*(.*?)\s*</juma-patch>",
+            r"<juma-patch>(.*?)</juma-patch>",
             response,
             re.DOTALL | re.IGNORECASE,
         )
         if tagged:
-            candidate = tagged.group(1).strip()
+            candidate = PatchManager._remove_wrapper_newlines(tagged.group(1))
         else:
             fenced = re.search(
                 r"```(?:diff|patch)?\s*\n(.*?)```",
                 response,
                 re.DOTALL | re.IGNORECASE,
             )
-            candidate = fenced.group(1).strip() if fenced else ""
+            candidate = PatchManager._remove_wrapper_newlines(fenced.group(1)) if fenced else ""
         if not PatchManager._looks_like_diff(candidate):
             lines = response.splitlines()
             starts = [
@@ -52,7 +52,21 @@ class PatchManager:
             candidate = "\n".join(lines[starts[0] :]).strip()
         if not PatchManager._looks_like_diff(candidate):
             return None
-        return candidate.replace("\r\n", "\n") + "\n"
+        candidate = candidate.replace("\r\n", "\n")
+        return candidate if candidate.endswith("\n") else candidate + "\n"
+
+    @staticmethod
+    def _remove_wrapper_newlines(candidate: str) -> str:
+        """Remove tag/fence separators without trimming meaningful diff whitespace."""
+        if candidate.startswith("\r\n"):
+            candidate = candidate[2:]
+        elif candidate.startswith("\n"):
+            candidate = candidate[1:]
+        if candidate.endswith("\r\n"):
+            candidate = candidate[:-2]
+        elif candidate.endswith("\n"):
+            candidate = candidate[:-1]
+        return candidate
 
     @staticmethod
     def _looks_like_diff(candidate: str) -> bool:

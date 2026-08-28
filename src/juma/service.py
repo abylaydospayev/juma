@@ -105,6 +105,13 @@ class Juma:
         action_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         snapshot = self.graph.get_state(self._config(thread_id))
+        interrupts = [
+            item
+            for task in snapshot.tasks
+            for item in getattr(task, "interrupts", ())
+        ]
+        if not interrupts:
+            raise ValueError(f"Thread {thread_id!r} is not waiting for approval.")
         pending_action = dict(snapshot.values).get("proposed_action") or {}
         if pending_action.get("kind") == "code.patch":
             expected_fingerprint = pending_action.get("fingerprint")

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from juma.config import Settings
 from juma.service import Juma
 
@@ -11,6 +13,15 @@ def settings(tmp_path: Path) -> Settings:
 class FakeModel:
     def generate(self, crew, request, *, proposed_action=None) -> str:
         return f"{crew} answer: {request}"
+
+
+class FailingModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, crew, request, *, proposed_action=None) -> str:
+        self.calls += 1
+        raise RuntimeError("model failed")
 
 
 def test_safe_request_completes(tmp_path: Path) -> None:
@@ -36,3 +47,15 @@ def test_risky_request_pauses_and_resumes(tmp_path: Path) -> None:
         finished = juma.resume("risky", approved=False, feedback="Keep the logs")
     assert finished["status"] == "rejected"
     assert "Keep the logs" in finished["state"]["response"]
+
+
+def test_failed_thread_cannot_be_approved_or_rerun(tmp_path: Path) -> None:
+    model = FailingModel()
+    with Juma(settings(tmp_path), model=model) as juma:
+        with pytest.raises(RuntimeError, match="model failed"):
+            juma.ask("research durable agent systems", thread_id="failed")
+
+        with pytest.raises(ValueError, match="not waiting for approval"):
+            juma.resume("failed", approved=True, action_fingerprint="placeholder")
+
+    assert model.calls == 1
