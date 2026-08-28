@@ -22,6 +22,10 @@ def show_model_error(error: JumaModelError) -> None:
     console.print(f"[red]Model error:[/red] {error}")
 
 
+def show_runtime_error(error: ValueError) -> None:
+    console.print(f"[red]juma error:[/red] {error}")
+
+
 @app.command()
 def ask(
     request: Annotated[str, typer.Argument(help="The task to route.")],
@@ -40,20 +44,63 @@ def ask(
 def approve(
     thread: Annotated[str, typer.Argument(help="Thread waiting for approval.")],
     feedback: Annotated[str, typer.Option(help="Optional reviewer feedback.")] = "",
+    fingerprint: Annotated[
+        str | None,
+        typer.Option(help="Exact action fingerprint shown in the patch preview."),
+    ] = None,
 ) -> None:
     """Approve and resume a paused task."""
-    with Juma() as juma:
-        show(juma.resume(thread, approved=True, feedback=feedback))
+    try:
+        with Juma() as juma:
+            show(
+                juma.resume(
+                    thread,
+                    approved=True,
+                    feedback=feedback,
+                    action_fingerprint=fingerprint,
+                )
+            )
+    except ValueError as error:
+        show_runtime_error(error)
+        raise typer.Exit(2) from None
 
 
 @app.command()
 def reject(
     thread: Annotated[str, typer.Argument(help="Thread waiting for approval.")],
     feedback: Annotated[str, typer.Option(help="Reason for rejection.")] = "",
+    fingerprint: Annotated[
+        str | None,
+        typer.Option(help="Exact action fingerprint shown in the patch preview."),
+    ] = None,
 ) -> None:
     """Reject and resume a paused task."""
-    with Juma() as juma:
-        show(juma.resume(thread, approved=False, feedback=feedback))
+    try:
+        with Juma() as juma:
+            show(
+                juma.resume(
+                    thread,
+                    approved=False,
+                    feedback=feedback,
+                    action_fingerprint=fingerprint,
+                )
+            )
+    except ValueError as error:
+        show_runtime_error(error)
+        raise typer.Exit(2) from None
+
+
+@app.command()
+def rollback(
+    thread: Annotated[str, typer.Argument(help="Thread with a failed applied patch.")],
+) -> None:
+    """Roll back the failed patch and rerun the tests."""
+    try:
+        with Juma() as juma:
+            show(juma.rollback(thread))
+    except ValueError as error:
+        show_runtime_error(error)
+        raise typer.Exit(2) from None
 
 
 @app.command("remember")

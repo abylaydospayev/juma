@@ -14,6 +14,7 @@ def make_action(
     risk: str,
     *,
     parameters: dict[str, Any] | None = None,
+    patch: str | None = None,
 ) -> ProposedAction:
     payload = {
         "kind": kind,
@@ -21,10 +22,22 @@ def make_action(
         "risk": risk,
         "parameters": parameters or {},
     }
+    if patch is not None:
+        payload["patch"] = patch
     fingerprint = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()[:16]
     return {**payload, "fingerprint": fingerprint}  # type: ignore[return-value]
+
+
+def patch_action(request: str, patch: str, files: list[str]) -> ProposedAction:
+    return make_action(
+        "code.patch",
+        f"Apply the proposed patch for: {request}",
+        "medium",
+        parameters={"files": files},
+        patch=patch,
+    )
 
 
 def coding_action(request: str) -> ProposedAction | None:

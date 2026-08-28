@@ -35,6 +35,10 @@ class ModelProviderError(JumaModelError):
     """Raised when the provider rejects or fails a model request."""
 
 
+class PatchGenerationError(JumaModelError):
+    """Raised when a requested coding change has no safe unified diff."""
+
+
 class ModelClient(Protocol):
     def generate(
         self,
@@ -56,6 +60,10 @@ CREW_INSTRUCTIONS: dict[AgentName, str] = {
         "Use those tools when they improve accuracy. You may propose changes, but you cannot "
         "write files, commit, push, or deploy. Never claim that you did any of those things. "
         "When an action requires approval, present the plan as pending approval. "
+        "For any requested code change, inspect the workspace first, then produce a proposed "
+        "unified diff inside <juma-patch> and </juma-patch> tags. The diff must use paths "
+        "relative to the workspace and must be complete enough for git apply. Never apply the "
+        "patch yourself; the safety gate handles that after approval. "
         "For an inspection, architecture explanation, diagnosis, or test request, the user's "
         "request is already a complete task: do not ask what software change they want. "
         "Use the workspace tools before answering. For project inspection, list the workspace "

@@ -41,6 +41,9 @@ def load_messages(thread_id: str) -> list[dict[str, Any]]:
             "interrupt": row["metadata"].get("interrupt"),
             "route_confidence": row["metadata"].get("route_confidence"),
             "route_reason": row["metadata"].get("route_reason"),
+            "action": row["metadata"].get("action"),
+            "patch_result": row["metadata"].get("patch_result"),
+            "rollback_available": row["metadata"].get("rollback_available", False),
         }
         for row in st.session_state.juma.history(thread_id)
     ]
@@ -73,6 +76,9 @@ def update_assistant(message: dict[str, Any], result: dict[str, Any]) -> None:
             "interrupt": result.get("interrupts", [None])[0],
             "route_confidence": state.get("route_confidence"),
             "route_reason": state.get("route_reason"),
+            "action": state.get("proposed_action"),
+            "patch_result": state.get("patch_result"),
+            "rollback_available": state.get("rollback_available", False),
         }
     )
 
@@ -87,18 +93,41 @@ def render_message(message: dict[str, Any], index: int) -> None:
             confidence = message.get("route_confidence")
             if confidence is not None:
                 st.caption(f"Route confidence: {confidence:.0%}")
+            action = message.get("action") or (message.get("interrupt") or {}).get("action")
+            if action and action.get("patch"):
+                with st.expander(
+                    "Patch preview",
+                    expanded=message.get("status") == "waiting_approval",
+                ):
+                    st.code(action["patch"], language="diff")
+            patch_result = message.get("patch_result") or {}
+            if patch_result:
+                test = patch_result.get("test") or {}
+                if patch_result.get("status") == "applied_tests_failed":
+                    st.error("The patch was applied, but the post-change tests failed.")
+                elif patch_result.get("status") == "rolled_back":
+                    st.success("The patch was rolled back.")
+                elif patch_result.get("status") == "applied_tests_passed":
+                    st.success("The patch was applied and the tests passed.")
+                if test.get("output"):
+                    with st.expander("Test output", expanded=False):
+                        st.code(test["output"])
+                if message.get("rollback_available") and st.button(
+                    "Rollback patch", key=f"rollback-{index}", type="primary"
+                ):
+                    rollback_patch(index)
             events = message.get("events", [])
             if events:
                 with st.expander("Activity", expanded=False):
                     for event in events:
                         detail = normalize_display_text(event["message"])
                         st.write(f"**{event['source']}** - {detail}")
-            if message.get("content") and message.get("agent") and st.button(
-                "Remember this", key=f"remember-{index}"
+            if (
+                message.get("content")
+                and message.get("agent")
+                and st.button("Remember this", key=f"remember-{index}")
             ):
-                st.session_state.juma.remember(
-                    message["agent"], message["content"], scope="shared"
-                )
+                st.session_state.juma.remember(message["agent"], message["content"], scope="shared")
                 st.toast("Saved to shared memory")
 
 
@@ -125,14 +154,31 @@ def render_approval(message: dict[str, Any]) -> None:
 
 def resolve(approved: bool, feedback: str) -> None:
     try:
+        pending = pending_approval()
+        action = (pending or {}).get("action") or ((pending or {}).get("interrupt") or {}).get(
+            "action", {}
+        )
         with st.spinner("Resuming juma..."):
             result = st.session_state.juma.resume(
-                st.session_state.thread_id, approved=approved, feedback=feedback
+                st.session_state.thread_id,
+                approved=approved,
+                feedback=feedback,
+                action_fingerprint=action.get("fingerprint"),
             )
-        update_assistant(pending_approval(), result)
+        update_assistant(pending, result)
         st.rerun()
-    except JumaModelError as error:
+    except (JumaModelError, ValueError) as error:
         st.error(f"Model error: {error}")
+
+
+def rollback_patch(index: int) -> None:
+    try:
+        with st.spinner("Rolling back patch..."):
+            result = st.session_state.juma.rollback(st.session_state.thread_id)
+        update_assistant(st.session_state.messages[index], result)
+        st.rerun()
+    except (JumaModelError, ValueError) as error:
+        st.error(f"Rollback error: {error}")
 
 
 def reset_chat() -> None:

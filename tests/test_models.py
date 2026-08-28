@@ -96,9 +96,7 @@ def test_openai_adapter_supports_structured_routing(tmp_path: Path) -> None:
         tmp_path / "checkpoints.sqlite",
         tmp_path / "memory.sqlite",
     )
-    model = OpenAIResponsesModel(
-        settings, client=SimpleNamespace(responses=RoutingResponses())
-    )
+    model = OpenAIResponsesModel(settings, client=SimpleNamespace(responses=RoutingResponses()))
 
     assert model.route("inspect the Python project") == {
         "target_agent": "coding",

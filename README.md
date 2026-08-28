@@ -12,6 +12,8 @@ The current runtime includes:
 - Live web search for the research crew, with source links when returned by the API.
 - Read-only workspace tools for the coding crew: list, read, search, and fixed checks.
 - Path traversal protection and fixed command allowlists for workspace tools.
+- Coding patches as reviewable unified diffs, exact-fingerprint approval, automatic tests, and
+  rollback after failed post-change tests.
 - Action fingerprints, approval interrupts, retries, and append-only local audit events.
 - CLI, Streamlit UI, and an MCP memory server.
 
@@ -26,12 +28,14 @@ Structured router --> one isolated crew --> safety gate --> durable result
                             +--> memory          +--> SQLite checkpoint
                             +--> web search
                             +--> read-only workspace tools
+                            +--> validated patch --> tests --> rollback on failure
 ```
 
 Crews never call each other. They communicate through the parent state, durable conversation
 history, or the memory service. External communication, file writes/deletes, publishing, and
-deployment are proposed actions and require approval. This version does not execute those
-mutating actions after approval until a dedicated least-privilege adapter is configured.
+deployment are proposed actions and require approval. Requested coding changes are handled as a
+special case: the coding crew returns a unified diff, the UI previews it, and the safety gate
+binds approval to the diff's action fingerprint. Only that approved diff is applied with Git.
 
 ## Setup
 
@@ -59,6 +63,7 @@ key into source files.
 ```powershell
 juma ask "research durable multi-agent memory"
 juma ask "inspect the router and run the tests"
+juma ask "add a health endpoint to the API" --thread feature-1
 juma ask "delete file old.log" --thread cleanup-1
 juma reject cleanup-1 --feedback "Keep it for 30 days"
 
@@ -66,11 +71,24 @@ juma remember coding "The router is deterministic unless a model route is availa
 juma memories router --crew admin
 ```
 
-The delete command pauses. Resume it later with:
+Risky actions pause. For a coding change, review the displayed patch and fingerprint, then resume
+it with the exact fingerprint:
 
 ```powershell
-juma approve cleanup-1
+juma approve feature-1 --fingerprint <fingerprint-from-preview>
 ```
+
+After approval, juma applies only that Git patch and runs `pytest -q`. If the tests fail, the UI
+offers a rollback button. The same operation is available from the CLI:
+
+```powershell
+juma rollback feature-1
+```
+
+Patch application expects the configured workspace to be a Git repository with a committed
+baseline. Keep unrelated edits out of the patch's target files while reviewing it. Non-code
+actions such as email, deletion, publishing, and deployment remain approval-gated proposals until
+their dedicated least-privilege adapters are connected.
 
 Thread state survives process restarts in `data/checkpoints.sqlite`; conversation history is
 stored in `data/conversations.sqlite`. Operational events are written to `data/audit.jsonl`.
@@ -90,8 +108,9 @@ streamlit run src/juma/ui.py
 ```
 
 The UI keeps durable chat history, displays the selected crew and routing confidence, shows
-activity, supports approval decisions, lets you save useful answers to shared memory, and
-searches shared memory in the sidebar.
+activity, previews generated diffs with their fingerprints, supports approval decisions, runs and
+displays post-change tests, offers rollback after failures, lets you save useful answers to shared
+memory, and searches shared memory in the sidebar.
 
 ## MCP memory server
 

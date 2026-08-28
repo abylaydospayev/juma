@@ -25,6 +25,7 @@ def _deterministic_decision(request: str) -> dict[str, str | float | AgentName]:
         reason = f"Matched {top} {target} signal(s), ahead of the next crew by {top - second}."
     return {"target_agent": target, "confidence": confidence, "reason": reason}
 
+
 CODING_TERMS = {
     "code",
     "bug",

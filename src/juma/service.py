@@ -13,6 +13,7 @@ from .conversation import ConversationStore
 from .graph import build_graph
 from .memory import MemoryStore
 from .models import ModelClient, OpenAIResponsesModel
+from .patches import PatchManager
 
 
 class Juma:
@@ -27,7 +28,13 @@ class Juma:
         self.memory = MemoryStore(self.settings.memory_db)
         self.conversations = ConversationStore(self.settings.data_dir / "conversations.sqlite")
         self.audit = AuditLog(self.settings.audit_log)
-        self.graph = build_graph(self.checkpointer, self.model, self.memory)
+        self.patch_manager = PatchManager(self.settings.resolved_workspace_root)
+        self.graph = build_graph(
+            self.checkpointer,
+            self.model,
+            self.memory,
+            self.patch_manager,
+        )
 
     @staticmethod
     def _config(thread_id: str) -> dict:
@@ -47,6 +54,10 @@ class Juma:
                 {
                     "request": request,
                     "status": "routing",
+                    "proposed_action": None,
+                    "patch_result": None,
+                    "rollback_available": False,
+                    "approval": None,
                     "conversation_history": [
                         {
                             "role": item["role"],
@@ -72,10 +83,8 @@ class Juma:
             agent=result.get("target_agent"),
             status=envelope["status"],
             metadata={
-                "events": result.get("events", []),
+                **self._metadata(result),
                 "interrupt": envelope.get("interrupts", [None])[0],
-                "route_confidence": result.get("route_confidence"),
-                "route_reason": result.get("route_reason"),
             },
         )
         self.audit.record(
@@ -87,16 +96,39 @@ class Juma:
         )
         return envelope
 
-    def resume(self, thread_id: str, *, approved: bool, feedback: str = "") -> dict[str, Any]:
+    def resume(
+        self,
+        thread_id: str,
+        *,
+        approved: bool,
+        feedback: str = "",
+        action_fingerprint: str | None = None,
+    ) -> dict[str, Any]:
+        snapshot = self.graph.get_state(self._config(thread_id))
+        pending_action = dict(snapshot.values).get("proposed_action") or {}
+        if pending_action.get("kind") == "code.patch":
+            expected_fingerprint = pending_action.get("fingerprint")
+            if action_fingerprint != expected_fingerprint:
+                raise ValueError(
+                    "This patch approval requires the exact action fingerprint "
+                    "shown in the preview."
+                )
         self.audit.record(
             "approval_decision",
             thread_id=thread_id,
             approved=approved,
             feedback_length=len(feedback),
+            action_fingerprint=action_fingerprint,
         )
         try:
             result = self.graph.invoke(
-                Command(resume={"approved": approved, "feedback": feedback}),
+                Command(
+                    resume={
+                        "approved": approved,
+                        "feedback": feedback,
+                        "action_fingerprint": action_fingerprint,
+                    }
+                ),
                 config=self._config(thread_id),
             )
         except Exception as exc:
@@ -108,12 +140,7 @@ class Juma:
             result.get("response", ""),
             agent=result.get("target_agent"),
             status=envelope["status"],
-            metadata={
-                "events": result.get("events", []),
-                "interrupt": None,
-                "route_confidence": result.get("route_confidence"),
-                "route_reason": result.get("route_reason"),
-            },
+            metadata=self._metadata(result),
         )
         self.audit.record(
             "run_finished",
@@ -131,6 +158,61 @@ class Juma:
 
     def remember(self, crew: str, content: str, *, scope: str = "shared") -> int:
         return self.memory.remember(crew, content, scope=scope)
+
+    def rollback(self, thread_id: str) -> dict[str, Any]:
+        snapshot = self.graph.get_state(self._config(thread_id))
+        state = dict(snapshot.values)
+        action = state.get("proposed_action") or {}
+        patch = action.get("patch")
+        if not state.get("rollback_available") or not patch:
+            raise ValueError("No failed patch is available to roll back for this thread.")
+        result = self.patch_manager.rollback(patch)
+        if result["status"] == "rolled_back":
+            response = state["response"] + " The patch was rolled back and the tests were rerun."
+            status = "completed"
+        else:
+            response = state["response"] + f" Rollback failed: {result['error']}"
+            status = "failed"
+        event = {"source": "patch", "message": f"Rollback result: {result['status']}."}
+        updated = {
+            **state,
+            "response": response,
+            "patch_result": result,
+            "rollback_available": False,
+            "status": status,
+            "events": [*state.get("events", []), event],
+        }
+        self.graph.update_state(
+            self._config(thread_id),
+            {
+                "response": response,
+                "patch_result": result,
+                "rollback_available": False,
+                "status": status,
+                "events": [event],
+            },
+        )
+        self.conversations.update_last_assistant(
+            thread_id,
+            response,
+            agent=updated.get("target_agent"),
+            status=status,
+            metadata=self._metadata(updated),
+        )
+        self.audit.record("patch_rollback", thread_id=thread_id, status=result["status"])
+        return {"thread_id": thread_id, "status": status, "state": updated}
+
+    @staticmethod
+    def _metadata(state: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "events": state.get("events", []),
+            "interrupt": None,
+            "action": state.get("proposed_action"),
+            "patch_result": state.get("patch_result"),
+            "rollback_available": state.get("rollback_available", False),
+            "route_confidence": state.get("route_confidence"),
+            "route_reason": state.get("route_reason"),
+        }
 
     @staticmethod
     def _envelope(thread_id: str, result: dict) -> dict[str, Any]:

@@ -29,11 +29,35 @@ def approval_gate(state: JumaState) -> dict[str, Any]:
     else:
         approved = bool(decision.get("approved", False))
         feedback = str(decision.get("feedback", ""))
+    if action.get("kind") == "code.patch":
+        supplied_fingerprint = (
+            decision.get("action_fingerprint") if isinstance(decision, dict) else None
+        )
+        if supplied_fingerprint != action.get("fingerprint"):
+            return {
+                "approval": {
+                    "approved": False,
+                    "feedback": feedback,
+                    "action_fingerprint": supplied_fingerprint,
+                },
+                "response": state["response"]
+                + " The approval was rejected because it did not match the exact "
+                "patch fingerprint.",
+                "status": "rejected",
+                "events": [{"source": "safety", "message": "Patch fingerprint mismatch."}],
+            }
 
     if approved:
-        suffix = " The action was approved; execution awaits a configured tool adapter."
+        if action.get("kind") == "code.patch":
+            suffix = " The patch was approved and will be applied with tests now."
+        else:
+            suffix = " The action was approved; execution awaits a configured tool adapter."
         return {
-            "approval": {"approved": True, "feedback": feedback},
+            "approval": {
+                "approved": True,
+                "feedback": feedback,
+                "action_fingerprint": action.get("fingerprint"),
+            },
             "response": state["response"] + suffix,
             "status": "completed",
             "events": [{"source": "safety", "message": "Action approved."}],
@@ -42,7 +66,11 @@ def approval_gate(state: JumaState) -> dict[str, Any]:
     if feedback:
         suffix += f" Feedback: {feedback}"
     return {
-        "approval": {"approved": False, "feedback": feedback},
+        "approval": {
+            "approved": False,
+            "feedback": feedback,
+            "action_fingerprint": action.get("fingerprint"),
+        },
         "response": state["response"] + suffix,
         "status": "rejected",
         "events": [{"source": "safety", "message": "Action rejected."}],
