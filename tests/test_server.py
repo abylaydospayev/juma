@@ -1,6 +1,10 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from juma import server
+from juma.config import Settings
+from juma.service import Juma as ServiceJuma
 
 client = TestClient(server.app)
 
@@ -172,3 +176,60 @@ def test_pending_action_error_returns_bad_request(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Thread 'missing' is not waiting for approval."}
+
+
+class IntegrationFakeModel:
+    def route(self, request: str) -> dict[str, str | float]:
+        return {
+            "target_agent": "research",
+            "confidence": 1.0,
+            "reason": "Deterministic integration-test route.",
+        }
+
+    def generate(self, crew, request, *, proposed_action=None) -> str:
+        return f"{crew} answer: {request}"
+
+
+def test_thread_lifecycle_persists_across_http_requests(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings = Settings(
+        data_dir=tmp_path,
+        checkpoint_db=tmp_path / "checkpoints.sqlite",
+        memory_db=tmp_path / "memory.sqlite",
+    )
+
+    def runtime() -> ServiceJuma:
+        return ServiceJuma(settings, model=IntegrationFakeModel())
+
+    monkeypatch.setattr(server, "Juma", runtime)
+
+    ask_response = client.post(
+        "/ask",
+        json={"request": "research durable agent systems"},
+    )
+
+    assert ask_response.status_code == 200
+    result = ask_response.json()
+    thread_id = result["thread_id"]
+    assert thread_id
+    assert result["status"] == "completed"
+
+    history_response = client.get(f"/threads/{thread_id}/history")
+
+    assert history_response.status_code == 200
+    history = history_response.json()
+    assert [message["role"] for message in history] == ["user", "assistant"]
+    assert history[0]["thread_id"] == thread_id
+    assert history[0]["content"] == "research durable agent systems"
+    assert history[1]["thread_id"] == thread_id
+    assert history[1]["content"] == (
+        "research answer: research durable agent systems"
+    )
+
+    threads_response = client.get("/threads")
+
+    assert threads_response.status_code == 200
+    threads = threads_response.json()
+    assert any(thread["thread_id"] == thread_id for thread in threads)
