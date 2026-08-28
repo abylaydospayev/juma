@@ -7,5 +7,6 @@ def test_action_fingerprint_binds_exact_request() -> None:
 
     assert first is not None
     assert first["kind"] == "filesystem.delete"
+    assert len(first["fingerprint"]) == 64
     assert first["fingerprint"] != second["fingerprint"]
     assert first["parameters"] == {"request": "delete file old.log"}

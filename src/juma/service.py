@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import sqlite3
 import uuid
 from typing import Any
@@ -115,7 +116,11 @@ class Juma:
         pending_action = dict(snapshot.values).get("proposed_action") or {}
         if pending_action.get("kind") == "code.patch":
             expected_fingerprint = pending_action.get("fingerprint")
-            if action_fingerprint != expected_fingerprint:
+            if not (
+                isinstance(action_fingerprint, str)
+                and isinstance(expected_fingerprint, str)
+                and hmac.compare_digest(action_fingerprint, expected_fingerprint)
+            ):
                 raise ValueError(
                     "This patch approval requires the exact action fingerprint "
                     "shown in the preview."
@@ -166,14 +171,34 @@ class Juma:
     def remember(self, crew: str, content: str, *, scope: str = "shared") -> int:
         return self.memory.remember(crew, content, scope=scope)
 
-    def rollback(self, thread_id: str) -> dict[str, Any]:
+    def rollback(
+        self,
+        thread_id: str,
+        *,
+        action_fingerprint: str | None = None,
+    ) -> dict[str, Any]:
         snapshot = self.graph.get_state(self._config(thread_id))
         state = dict(snapshot.values)
         action = state.get("proposed_action") or {}
         patch = action.get("patch")
         if not state.get("rollback_available") or not patch:
             raise ValueError("No failed patch is available to roll back for this thread.")
-        result = self.patch_manager.rollback(patch)
+        expected_fingerprint = action.get("fingerprint")
+        if not (
+            isinstance(action_fingerprint, str)
+            and isinstance(expected_fingerprint, str)
+            and hmac.compare_digest(action_fingerprint, expected_fingerprint)
+        ):
+            raise ValueError(
+                "This patch rollback requires the exact action fingerprint "
+                "shown in the preview."
+            )
+        patch_result = state.get("patch_result") or {}
+        result = self.patch_manager.rollback(
+            patch,
+            expected_post_apply_hashes=patch_result.get("post_apply_hashes"),
+            expected_pre_apply_hashes=patch_result.get("pre_apply_hashes"),
+        )
         if result["status"] == "rolled_back":
             response = state["response"] + " The patch was rolled back and the tests were rerun."
             status = "completed"

@@ -173,9 +173,14 @@ def resolve(approved: bool, feedback: str) -> None:
 
 def rollback_patch(index: int) -> None:
     try:
+        message = st.session_state.messages[index]
+        action = message.get("action") or (message.get("interrupt") or {}).get("action", {})
         with st.spinner("Rolling back patch..."):
-            result = st.session_state.juma.rollback(st.session_state.thread_id)
-        update_assistant(st.session_state.messages[index], result)
+            result = st.session_state.juma.rollback(
+                st.session_state.thread_id,
+                action_fingerprint=action.get("fingerprint"),
+            )
+        update_assistant(message, result)
         st.rerun()
     except (JumaModelError, ValueError) as error:
         st.error(f"Rollback error: {error}")

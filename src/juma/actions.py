@@ -25,8 +25,8 @@ def make_action(
     if patch is not None:
         payload["patch"] = patch
     fingerprint = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()[:16]
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     return {**payload, "fingerprint": fingerprint}  # type: ignore[return-value]
 
 

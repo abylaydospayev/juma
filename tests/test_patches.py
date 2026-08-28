@@ -98,12 +98,35 @@ def test_patch_manager_applies_and_rolls_back(tmp_path: Path) -> None:
 
     result = manager.apply_and_test(PATCH)
     assert result["status"] == "applied_tests_failed"
+    assert result["pre_apply_hashes"]["target.py"]
+    assert result["post_apply_hashes"]["target.py"]
     assert (tmp_path / "target.py").read_text(encoding="utf-8") == "value = 2\n"
 
-    rolled_back = manager.rollback(PATCH)
+    rolled_back = manager.rollback(
+        PATCH,
+        expected_post_apply_hashes=result["post_apply_hashes"],
+        expected_pre_apply_hashes=result["pre_apply_hashes"],
+    )
     assert rolled_back["status"] == "rolled_back"
     assert rolled_back["test"]["return_code"] == 0
     assert (tmp_path / "target.py").read_text(encoding="utf-8") == "value = 1\n"
+
+
+def test_rollback_refuses_post_apply_file_tampering(tmp_path: Path) -> None:
+    repository(tmp_path)
+    manager = PatchManager(tmp_path)
+    result = manager.apply_and_test(PATCH)
+    (tmp_path / "target.py").write_text("value = attacker\n", encoding="utf-8")
+
+    rolled_back = manager.rollback(
+        PATCH,
+        expected_post_apply_hashes=result["post_apply_hashes"],
+        expected_pre_apply_hashes=result["pre_apply_hashes"],
+    )
+
+    assert rolled_back["status"] == "apply_failed"
+    assert "changed after patch application" in rolled_back["error"]
+    assert (tmp_path / "target.py").read_text(encoding="utf-8") == "value = attacker\n"
 
 
 def test_patch_manager_builds_exact_git_diff_from_file_contents(tmp_path: Path) -> None:
@@ -144,7 +167,7 @@ def test_patch_requires_approval_and_exposes_rollback(tmp_path: Path) -> None:
         assert paused["status"] == "waiting_approval"
         action = paused["interrupts"][0]["action"]
         assert action["kind"] == "code.patch"
-        assert action["fingerprint"]
+        assert len(action["fingerprint"]) == 64
         assert (tmp_path / "target.py").read_text(encoding="utf-8") == "value = 1\n"
 
         fingerprint = action["fingerprint"]
@@ -157,9 +180,19 @@ def test_patch_requires_approval_and_exposes_rollback(tmp_path: Path) -> None:
         assert finished["status"] == "completed"
         assert finished["state"]["approval"]["action_fingerprint"] == fingerprint
         assert finished["state"]["patch_result"]["status"] == "applied_tests_failed"
+        assert finished["state"]["patch_result"]["post_apply_hashes"]["target.py"]
         assert finished["state"]["rollback_available"] is True
 
-        rolled_back = juma.rollback("patch-thread")
+        with pytest.raises(ValueError, match="exact action fingerprint"):
+            juma.rollback("patch-thread", action_fingerprint="wrong")
+
+        rolled_back = juma.rollback(
+            "patch-thread",
+            action_fingerprint=fingerprint,
+        )
         assert rolled_back["status"] == "completed"
         assert rolled_back["state"]["patch_result"]["status"] == "rolled_back"
         assert (tmp_path / "target.py").read_text(encoding="utf-8") == "value = 1\n"
+
+        with pytest.raises(ValueError, match="No failed patch"):
+            juma.rollback("patch-thread")

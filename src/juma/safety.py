@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import hmac
 from typing import Any
 
 from langgraph.types import interrupt
 
 from .state import JumaState
+
+
+def _fingerprints_match(expected: object, supplied: object) -> bool:
+    return (
+        isinstance(expected, str)
+        and isinstance(supplied, str)
+        and hmac.compare_digest(supplied, expected)
+    )
 
 
 def approval_gate(state: JumaState) -> dict[str, Any]:
@@ -33,7 +42,7 @@ def approval_gate(state: JumaState) -> dict[str, Any]:
         supplied_fingerprint = (
             decision.get("action_fingerprint") if isinstance(decision, dict) else None
         )
-        if supplied_fingerprint != action.get("fingerprint"):
+        if not _fingerprints_match(action.get("fingerprint"), supplied_fingerprint):
             return {
                 "approval": {
                     "approved": False,

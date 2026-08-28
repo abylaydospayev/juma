@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import re
 import subprocess
 from pathlib import Path
@@ -132,6 +133,7 @@ class PatchManager:
     def apply_and_test(self, patch: str) -> dict[str, Any]:
         try:
             files = self.validate(patch)
+            pre_apply_hashes = self._file_hashes(files)
         except (OSError, subprocess.SubprocessError, PatchError) as exc:
             return {"status": "apply_failed", "files": [], "error": str(exc)}
         try:
@@ -149,13 +151,37 @@ class PatchManager:
         if applied.returncode:
             detail = (applied.stderr or applied.stdout).strip()
             return {"status": "apply_failed", "files": files, "error": detail}
+        post_apply_hashes = self._file_hashes(files)
         test = self._run_tests()
         status = "applied_tests_passed" if test["return_code"] == 0 else "applied_tests_failed"
-        return {"status": status, "files": files, "test": test}
+        return {
+            "status": status,
+            "files": files,
+            "pre_apply_hashes": pre_apply_hashes,
+            "post_apply_hashes": post_apply_hashes,
+            "test": test,
+        }
 
-    def rollback(self, patch: str) -> dict[str, Any]:
+    def rollback(
+        self,
+        patch: str,
+        *,
+        expected_post_apply_hashes: dict[str, str | None] | None = None,
+        expected_pre_apply_hashes: dict[str, str | None] | None = None,
+    ) -> dict[str, Any]:
         try:
             files = self.files(patch)
+            if expected_post_apply_hashes is not None:
+                current_hashes = self._file_hashes(files)
+                if current_hashes != expected_post_apply_hashes:
+                    return {
+                        "status": "apply_failed",
+                        "files": files,
+                        "error": (
+                            "Workspace files changed after patch application; "
+                            "rollback refused."
+                        ),
+                    }
             reversed_patch = subprocess.run(
                 [
                     "git",
@@ -177,8 +203,34 @@ class PatchManager:
         if reversed_patch.returncode:
             detail = (reversed_patch.stderr or reversed_patch.stdout).strip()
             return {"status": "apply_failed", "files": files, "error": detail}
+        restored_hashes = self._file_hashes(files)
+        if expected_pre_apply_hashes is not None and restored_hashes != expected_pre_apply_hashes:
+            return {
+                "status": "apply_failed",
+                "files": files,
+                "error": "Rollback did not restore the original file hashes.",
+            }
         test = self._run_tests()
-        return {"status": "rolled_back", "files": files, "test": test}
+        return {
+            "status": "rolled_back",
+            "files": files,
+            "restored_hashes": restored_hashes,
+            "test": test,
+        }
+
+    def _file_hashes(self, files: list[str]) -> dict[str, str | None]:
+        hashes: dict[str, str | None] = {}
+        for relative_path in files:
+            target = self.root / relative_path
+            if not target.is_file():
+                hashes[relative_path] = None
+                continue
+            digest = hashlib.sha256()
+            with target.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            hashes[relative_path] = digest.hexdigest()
+        return hashes
 
     def _run_tests(self) -> dict[str, Any]:
         try:

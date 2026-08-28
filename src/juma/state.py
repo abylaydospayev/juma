@@ -36,6 +36,9 @@ class PatchResult(TypedDict):
         "rolled_back",
     ]
     files: list[str]
+    pre_apply_hashes: NotRequired[dict[str, str | None]]
+    post_apply_hashes: NotRequired[dict[str, str | None]]
+    restored_hashes: NotRequired[dict[str, str | None]]
     test: NotRequired[dict]
     error: NotRequired[str]
 

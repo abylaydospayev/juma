@@ -155,11 +155,16 @@ def reject_thread(thread_id: str, payload: ActionRequest) -> RejectionResponse:
     response_model=RollbackResponse,
     response_model_exclude_none=True,
 )
-def rollback_thread(thread_id: str) -> RollbackResponse:
-    """Roll back a failed patch for a thread."""
+def rollback_thread(thread_id: str, payload: ActionRequest) -> RollbackResponse:
+    """Roll back a failed patch after verifying its exact fingerprint."""
     try:
         with Juma() as juma:
-            return RollbackResponse.model_validate(juma.rollback(thread_id))
+            return RollbackResponse.model_validate(
+                juma.rollback(
+                    thread_id,
+                    action_fingerprint=payload.action_fingerprint,
+                )
+            )
     except ValueError as error:
         raise _bad_request(error) from error
 

@@ -84,7 +84,7 @@ After approval, juma applies only that Git patch and runs `pytest -q`. If the te
 offers a rollback button. The same operation is available from the CLI:
 
 ```powershell
-juma rollback feature-1
+juma rollback feature-1 --fingerprint <fingerprint-from-preview>
 ```
 
 Patch application expects the configured workspace to be a Git repository with a committed

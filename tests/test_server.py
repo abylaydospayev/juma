@@ -72,8 +72,10 @@ class FakeJuma:
             "state": {"approved": approved, "feedback": feedback},
         }
 
-    def rollback(self, thread_id: str) -> dict:
-        self.calls.append(("rollback", (thread_id,), {}))
+    def rollback(self, thread_id: str, *, action_fingerprint: str | None = None) -> dict:
+        self.calls.append(
+            ("rollback", (thread_id,), {"action_fingerprint": action_fingerprint})
+        )
         return {"thread_id": thread_id, "status": "completed", "state": {}}
 
 
@@ -181,14 +183,19 @@ def test_reject_forwards_feedback(monkeypatch) -> None:
     ]
 
 
-def test_rollback_forwards_thread_id(monkeypatch) -> None:
+def test_rollback_forwards_thread_id_and_fingerprint(monkeypatch) -> None:
     install_fake(monkeypatch)
 
-    response = client.post("/threads/thread-1/rollback")
+    response = client.post(
+        "/threads/thread-1/rollback",
+        json={"action_fingerprint": "abc123"},
+    )
 
     assert response.status_code == 200
     assert response.json() == {"thread_id": "thread-1", "status": "completed", "state": {}}
-    assert FakeJuma.calls == [("rollback", ("thread-1",), {})]
+    assert FakeJuma.calls == [
+        ("rollback", ("thread-1",), {"action_fingerprint": "abc123"})
+    ]
 
 
 def test_pending_action_error_returns_bad_request(monkeypatch) -> None:

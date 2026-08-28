@@ -93,11 +93,15 @@ def reject(
 @app.command()
 def rollback(
     thread: Annotated[str, typer.Argument(help="Thread with a failed applied patch.")],
+    fingerprint: Annotated[
+        str | None,
+        typer.Option(help="Exact action fingerprint shown in the patch preview."),
+    ] = None,
 ) -> None:
     """Roll back the failed patch and rerun the tests."""
     try:
         with Juma() as juma:
-            show(juma.rollback(thread))
+            show(juma.rollback(thread, action_fingerprint=fingerprint))
     except ValueError as error:
         show_runtime_error(error)
         raise typer.Exit(2) from None
