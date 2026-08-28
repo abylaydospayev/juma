@@ -377,15 +377,16 @@ class OpenAIResponsesModel:
             return output
         if not isinstance(payload, dict):
             return output
-        answer = OpenAIResponsesModel._clean_patch_response_text(
-            str(payload.get("response", ""))
-        )
+        raw_answer = str(payload.get("response", ""))
+        answer = OpenAIResponsesModel._clean_patch_response_text(raw_answer)
         if "changes" in payload:
             patch = PatchManager(workspace.root).from_file_changes(payload["changes"])
         elif "patch" in payload:
             patch = str(payload.get("patch", "")).strip()
         else:
-            return output
+            patch = PatchManager.extract(raw_answer)
+            if not patch:
+                return output
         if not patch:
             return answer
         return f"{answer}\n\n<juma-patch>\n{patch}\n</juma-patch>".strip()

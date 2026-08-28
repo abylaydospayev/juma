@@ -131,6 +131,17 @@ class StructuredFileChangesWithEmbeddedPatchResponses:
         )
 
 
+class StructuredResponseOnlyPatchResponses:
+    def create(self, **kwargs):
+        return SimpleNamespace(
+            output_text=(
+                '{"response":"Summary\\n<juma-patch>\\n'
+                '--- a/src/app.py\\n+++ b/src/app.py\\n@@ -1 +1 @@\\n'
+                '-old\\n+new\\n</juma-patch>"}'
+            )
+        )
+
+
 def test_openai_responses_adapter_uses_luna(tmp_path: Path) -> None:
     settings = Settings(
         tmp_path,
@@ -269,3 +280,22 @@ def test_openai_adapter_discards_model_embedded_patch_in_structured_response(
     assert output.count("<juma-patch>") == 1
     assert "bad.py" not in output
     assert "diff --git a/src/app.py b/src/app.py" in output
+
+
+def test_openai_adapter_recovers_patch_from_response_only_payload(tmp_path: Path) -> None:
+    settings = Settings(
+        tmp_path,
+        tmp_path / "checkpoints.sqlite",
+        tmp_path / "memory.sqlite",
+        workspace_root=tmp_path,
+    )
+    model = OpenAIResponsesModel(
+        settings,
+        client=SimpleNamespace(responses=StructuredResponseOnlyPatchResponses()),
+    )
+
+    output = model.generate("coding", "add a health endpoint")
+
+    assert output.startswith("Summary")
+    assert output.count("<juma-patch>") == 1
+    assert "--- a/src/app.py" in output
