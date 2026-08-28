@@ -74,9 +74,12 @@ CREW_INSTRUCTIONS: dict[AgentName, str] = {
         "write files, commit, push, or deploy. Never claim that you did any of those things. "
         "When an action requires approval, present the plan as pending approval. "
         "For any requested code change, inspect the workspace first, then produce a proposed "
-        "unified diff inside <juma-patch> and </juma-patch> tags. The diff must use paths "
-        "relative to the workspace and must be complete enough for git apply. Never apply the "
-        "patch yourself; the safety gate handles that after approval. "
+        "unified diff inside <juma-patch> and </juma-patch> tags. The diff must use paths relative "
+        "to the workspace and must be complete enough for git apply. Never apply the patch "
+        "yourself; the safety gate handles that after approval. "
+        "Choose the smallest conventional implementation that satisfies the request. If the "
+        "requested component does not yet exist, create it with focused tests instead of asking "
+        "for clarification, unless the requirements conflict. "
         "For an inspection, architecture explanation, diagnosis, or test request, the user's "
         "request is already a complete task: do not ask what software change they want. "
         "Use the workspace tools before answering. For project inspection, list the workspace "
@@ -346,6 +349,7 @@ class OpenAIResponsesModel:
                     "response": {"type": "string"},
                     "patch": {
                         "type": "string",
+                        "minLength": 1,
                         "description": (
                             "A complete plain unified diff with workspace-relative paths."
                         ),

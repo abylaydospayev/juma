@@ -30,6 +30,19 @@ def build_coding_crew(model: ModelClient, patch_manager: PatchManager | None = N
         response = model.generate("coding", model_request(state), proposed_action=initial_action)
         patch = PatchManager.extract(response)
         if not patch and _is_change_request(state["request"]):
+            response = model.generate(
+                "coding",
+                model_request(state)
+                + "\n\nThe previous coding response was not usable because it contained no "
+                "unified diff. Continue autonomously: choose the smallest conventional "
+                "implementation that satisfies the request, create any missing component "
+                "needed by the request, add focused tests, and return a complete plain unified "
+                "diff inside <juma-patch> and </juma-patch>. Do not ask a clarification question "
+                "unless the requirements conflict.",
+                proposed_action=initial_action,
+            )
+            patch = PatchManager.extract(response)
+        if not patch and _is_change_request(state["request"]):
             raise PatchGenerationError(
                 "The coding crew did not return a unified patch for the requested change. "
                 "No files were modified."

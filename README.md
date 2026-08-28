@@ -12,8 +12,8 @@ The current runtime includes:
 - Live web search for the research crew, with source links when returned by the API.
 - Read-only workspace tools for the coding crew: list, read, search, and fixed checks.
 - Path traversal protection and fixed command allowlists for workspace tools.
-- Coding patches as reviewable unified diffs, exact-fingerprint approval, automatic tests, and
-  rollback after failed post-change tests.
+- Coding patches as reviewable unified diffs, strict structured patch generation, exact-fingerprint
+  approval, automatic tests, and rollback after failed post-change tests.
 - Action fingerprints, approval interrupts, retries, and append-only local audit events.
 - CLI, Streamlit UI, and an MCP memory server.
 
@@ -63,7 +63,7 @@ key into source files.
 ```powershell
 juma ask "research durable multi-agent memory"
 juma ask "inspect the router and run the tests"
-juma ask "add a health endpoint to the API" --thread feature-1
+juma ask "Add a FastAPI server with GET /health returning {status: ok}, add tests, and return a unified diff" --thread feature-1
 juma ask "delete file old.log" --thread cleanup-1
 juma reject cleanup-1 --feedback "Keep it for 30 days"
 
