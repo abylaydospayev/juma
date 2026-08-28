@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any, Protocol
 
@@ -20,6 +21,18 @@ INSPECTION_TERMS = (
     "run tests",
     "test suite",
     "pytest",
+)
+CODE_CHANGE_TERMS = (
+    "add",
+    "build",
+    "change",
+    "create",
+    "edit",
+    "fix",
+    "implement",
+    "modify",
+    "refactor",
+    "update",
 )
 
 
@@ -143,10 +156,21 @@ class OpenAIResponsesModel:
             if preflight:
                 request += "\n\nPreflight evidence collected by juma:\n" + "\n".join(preflight)
 
+        structured_patch = crew == "coding" and self._is_code_change_request(request)
+        if structured_patch:
+            instructions += (
+                " Return a JSON object matching the requested code-change schema. Put the concise "
+                "answer in response and the complete plain unified diff in patch. The patch must "
+                "be directly consumable by git apply; do not include Markdown fences or prose in "
+                "the patch string. Never leave patch empty for a requested change."
+            )
+        text_format = self._patch_response_format() if structured_patch else None
+
         response = self._create_response(
             instructions=instructions,
             input=request,
             tools=tools,
+            text_format=text_format,
         )
         transcript: list[Any] = []
         calls: list[Any] = []
@@ -179,6 +203,7 @@ class OpenAIResponsesModel:
                 instructions=instructions,
                 input=transcript,
                 tools=tools,
+                text_format=text_format,
             )
 
         if calls:
@@ -190,11 +215,14 @@ class OpenAIResponsesModel:
                 ),
                 input=transcript,
                 tools=[],
+                text_format=text_format,
             )
 
         output = self._output_text(response).strip()
         if not output:
             raise ModelProviderError("OpenAI returned no text output.")
+        if structured_patch:
+            output = self._normalize_patch_response(output)
         sources = self._sources(response)
         if sources and "Sources" not in output:
             output += "\n\n### Sources\n" + "\n".join(
@@ -297,6 +325,50 @@ class OpenAIResponsesModel:
     def _is_inspection_request(request: str) -> bool:
         lowered = OpenAIResponsesModel._current_request(request).casefold()
         return any(term in lowered for term in INSPECTION_TERMS)
+
+    @staticmethod
+    def _is_code_change_request(request: str) -> bool:
+        current = OpenAIResponsesModel._current_request(request).casefold()
+        if "update me" in current or "give me an update" in current:
+            return False
+        words = set(re.findall(r"[a-z]+", current))
+        return bool(words & set(CODE_CHANGE_TERMS))
+
+    @staticmethod
+    def _patch_response_format() -> dict[str, Any]:
+        return {
+            "type": "json_schema",
+            "name": "juma_code_change",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "response": {"type": "string"},
+                    "patch": {
+                        "type": "string",
+                        "description": (
+                            "A complete plain unified diff with workspace-relative paths."
+                        ),
+                    },
+                },
+                "required": ["response", "patch"],
+                "additionalProperties": False,
+            },
+        }
+
+    @staticmethod
+    def _normalize_patch_response(output: str) -> str:
+        try:
+            payload = json.loads(output)
+        except json.JSONDecodeError:
+            return output
+        if not isinstance(payload, dict) or "patch" not in payload:
+            return output
+        answer = str(payload.get("response", "")).strip()
+        patch = str(payload.get("patch", "")).strip()
+        if not patch:
+            return answer
+        return f"{answer}\n\n<juma-patch>\n{patch}\n</juma-patch>".strip()
 
     @staticmethod
     def _current_request(request: str) -> str:

@@ -71,6 +71,16 @@ class ExhaustedWorkspaceResponses:
         )
 
 
+class StructuredPatchResponses:
+    def create(self, **kwargs):
+        return SimpleNamespace(
+            output_text=(
+                '{"response":"I prepared the requested change.",'
+                '"patch":"--- a/src/app.py\\n+++ b/src/app.py\\n@@ -1 +1 @@\\n-old\\n+new"}'
+            )
+        )
+
+
 def test_openai_responses_adapter_uses_luna(tmp_path: Path) -> None:
     settings = Settings(
         tmp_path,
@@ -133,3 +143,20 @@ def test_openai_adapter_finishes_after_tool_budget(tmp_path: Path) -> None:
 
     assert model.generate("coding", "inspect the project") == "Final report."
     assert responses.calls[-1].get("tools", []) == []
+
+
+def test_openai_adapter_normalizes_structured_coding_patch(tmp_path: Path) -> None:
+    settings = Settings(
+        tmp_path,
+        tmp_path / "checkpoints.sqlite",
+        tmp_path / "memory.sqlite",
+        workspace_root=tmp_path,
+    )
+    responses = StructuredPatchResponses()
+    model = OpenAIResponsesModel(settings, client=SimpleNamespace(responses=responses))
+
+    output = model.generate("coding", "add a health endpoint")
+
+    assert "I prepared the requested change." in output
+    assert "<juma-patch>" in output
+    assert "--- a/src/app.py" in output

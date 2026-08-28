@@ -27,6 +27,8 @@ def _deterministic_decision(request: str) -> dict[str, str | float | AgentName]:
 
 
 CODING_TERMS = {
+    "add",
+    "api",
     "code",
     "bug",
     "build",
@@ -40,6 +42,8 @@ CODING_TERMS = {
     "remove",
     "repository",
     "script",
+    "endpoint",
+    "server",
     "sql",
     "test",
 }
