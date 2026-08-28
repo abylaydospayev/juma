@@ -13,7 +13,9 @@ The current runtime includes:
 - Read-only workspace tools for the coding crew: list, read, search, and fixed checks.
 - Path traversal protection and fixed command allowlists for workspace tools.
 - Coding patches as reviewable unified diffs, strict structured patch generation, exact-fingerprint
-  approval, automatic tests, and rollback after failed post-change tests.
+  approval, automatic tests, and rollback after failed post-change tests. Coding responses provide
+  final file contents; juma builds the Git diff against the current checkout so stale hunks are
+  rejected before approval.
 - Action fingerprints, approval interrupts, retries, and append-only local audit events.
 - CLI, Streamlit UI, and an MCP memory server.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import re
 import subprocess
 from pathlib import Path
@@ -157,7 +158,50 @@ class PatchManager:
         except (OSError, subprocess.SubprocessError) as exc:
             return {"check": "tests", "return_code": -1, "output": str(exc)}
 
+    def from_file_changes(self, changes: list[dict[str, Any]]) -> str:
+        """Build an exact Git diff from proposed final file contents."""
+        sections: list[str] = []
+        seen: set[str] = set()
+        for change in changes:
+            relative_path = str(change.get("path", ""))
+            operation = str(change.get("operation", "upsert"))
+            if relative_path in seen:
+                raise PatchError(f"The patch lists a file more than once: {relative_path}")
+            seen.add(relative_path)
+            self._validate_path(relative_path)
+            if operation not in {"upsert", "delete"}:
+                raise PatchError(f"Unsupported file operation: {operation}")
+            target = self.root / relative_path
+            existed = target.is_file()
+            try:
+                old_content = target.read_text(encoding="utf-8") if existed else ""
+            except (OSError, UnicodeDecodeError) as exc:
+                raise PatchError(f"Cannot read {relative_path}: {exc}") from exc
+            new_content = "" if operation == "delete" else str(change.get("content", ""))
+            if old_content == new_content:
+                continue
+            from_path = f"a/{relative_path}" if existed else "/dev/null"
+            to_path = f"b/{relative_path}" if operation == "upsert" else "/dev/null"
+            diff = difflib.unified_diff(
+                old_content.splitlines(keepends=True),
+                new_content.splitlines(keepends=True),
+                fromfile=from_path,
+                tofile=to_path,
+                lineterm="\n",
+            )
+            header = f"diff --git a/{relative_path} b/{relative_path}\n"
+            if not existed:
+                header += "new file mode 100644\n"
+            elif operation == "delete":
+                header += "deleted file mode 100644\n"
+            sections.append(header + "".join(diff))
+        if not sections:
+            raise PatchError("The proposed file changes do not modify the workspace.")
+        return "".join(sections)
+
     def _validate_path(self, relative_path: str) -> None:
+        if not relative_path or relative_path in {".", ".."}:
+            raise PatchError("The patch contains an empty or invalid workspace path.")
         candidate = (self.root / relative_path).resolve()
         try:
             candidate.relative_to(self.root)

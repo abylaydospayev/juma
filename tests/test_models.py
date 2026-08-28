@@ -108,6 +108,17 @@ class ToolThenStructuredPatchResponses:
         )
 
 
+class StructuredFileChangesResponses:
+    def create(self, **kwargs):
+        return SimpleNamespace(
+            output_text=(
+                '{"response":"I prepared the requested change.","changes":['
+                '{"path":"src/app.py","operation":"upsert",'
+                '"content":"value = 1\\n"}]}'
+            )
+        )
+
+
 def test_openai_responses_adapter_uses_luna(tmp_path: Path) -> None:
     settings = Settings(
         tmp_path,
@@ -206,3 +217,22 @@ def test_openai_adapter_preserves_request_across_tool_rounds(tmp_path: Path) -> 
         "role": "user",
         "content": "add a health endpoint",
     }
+
+
+def test_openai_adapter_builds_diff_from_structured_file_contents(tmp_path: Path) -> None:
+    settings = Settings(
+        tmp_path,
+        tmp_path / "checkpoints.sqlite",
+        tmp_path / "memory.sqlite",
+        workspace_root=tmp_path,
+    )
+    model = OpenAIResponsesModel(
+        settings,
+        client=SimpleNamespace(responses=StructuredFileChangesResponses()),
+    )
+
+    output = model.generate("coding", "add a health endpoint")
+
+    assert "diff --git a/src/app.py b/src/app.py" in output
+    assert "--- /dev/null" in output
+    assert "+++ b/src/app.py" in output

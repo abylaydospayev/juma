@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from openai import OpenAI
 
 from .config import Settings
+from .patches import PatchManager
 from .state import AgentName, ProposedAction
 from .workspace import WORKSPACE_TOOLS, WorkspaceTools
 
@@ -73,13 +74,9 @@ CREW_INSTRUCTIONS: dict[AgentName, str] = {
         "Use those tools when they improve accuracy. You may propose changes, but you cannot "
         "write files, commit, push, or deploy. Never claim that you did any of those things. "
         "When an action requires approval, present the plan as pending approval. "
-        "For any requested code change, inspect the workspace first, then produce a proposed "
-        "unified diff inside <juma-patch> and </juma-patch> tags. The diff must use paths relative "
-        "to the workspace and must be complete enough for git apply. Never apply the patch "
-        "yourself; the safety gate handles that after approval. "
-        "Every file section must start with diff --git. Represent new files with new file mode, "
-        "--- /dev/null, +++ b/path, and a valid hunk header. Never use *** Add File or *** Update "
-        "File markers. "
+        "For any requested code change, inspect the workspace first, then propose the final UTF-8 "
+        "contents of every changed file. The runtime will create the unified diff and safety gate "
+        "will apply it after approval; never write files, commit, push, or deploy yourself. "
         "Choose the smallest conventional implementation that satisfies the request. If the "
         "requested component does not yet exist, create it with focused tests instead of asking "
         "for clarification, unless the requirements conflict. "
@@ -166,10 +163,12 @@ class OpenAIResponsesModel:
         if structured_patch:
             instructions += (
                 " Return a JSON object matching the requested code-change schema. Put the concise "
-                "answer in response and the complete plain unified diff in patch. The patch must "
-                "be directly consumable by git apply; do not include Markdown fences or prose in "
-                "the patch string. Every section must begin with diff --git, including new files. "
-                "Never leave patch empty for a requested change."
+                "answer in response and list every changed file in changes with its "
+                "workspace-relative "
+                "path, operation (upsert or delete), and complete final UTF-8 content. Do not "
+                "return "
+                "hunks, Markdown fences, or apply-patch markers. Include new files and focused "
+                "tests."
             )
         text_format = self._patch_response_format() if structured_patch else None
 
@@ -229,7 +228,7 @@ class OpenAIResponsesModel:
         if not output:
             raise ModelProviderError("OpenAI returned no text output.")
         if structured_patch:
-            output = self._normalize_patch_response(output)
+            output = self._normalize_patch_response(output, workspace)
         sources = self._sources(response)
         if sources and "Sources" not in output:
             output += "\n\n### Sources\n" + "\n".join(
@@ -351,29 +350,40 @@ class OpenAIResponsesModel:
                 "type": "object",
                 "properties": {
                     "response": {"type": "string"},
-                    "patch": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": (
-                            "A complete plain unified diff with workspace-relative paths."
-                        ),
+                    "changes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string"},
+                                "operation": {"type": "string", "enum": ["upsert", "delete"]},
+                                "content": {"type": "string"},
+                            },
+                            "required": ["path", "operation", "content"],
+                            "additionalProperties": False,
+                        },
                     },
                 },
-                "required": ["response", "patch"],
+                "required": ["response", "changes"],
                 "additionalProperties": False,
             },
         }
 
     @staticmethod
-    def _normalize_patch_response(output: str) -> str:
+    def _normalize_patch_response(output: str, workspace: WorkspaceTools) -> str:
         try:
             payload = json.loads(output)
         except json.JSONDecodeError:
             return output
-        if not isinstance(payload, dict) or "patch" not in payload:
+        if not isinstance(payload, dict):
             return output
         answer = str(payload.get("response", "")).strip()
-        patch = str(payload.get("patch", "")).strip()
+        if "changes" in payload:
+            patch = PatchManager(workspace.root).from_file_changes(payload["changes"])
+        elif "patch" in payload:
+            patch = str(payload.get("patch", "")).strip()
+        else:
+            return output
         if not patch:
             return answer
         return f"{answer}\n\n<juma-patch>\n{patch}\n</juma-patch>".strip()

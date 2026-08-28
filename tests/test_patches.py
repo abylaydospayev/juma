@@ -106,6 +106,21 @@ def test_patch_manager_applies_and_rolls_back(tmp_path: Path) -> None:
     assert (tmp_path / "target.py").read_text(encoding="utf-8") == "value = 1\n"
 
 
+def test_patch_manager_builds_exact_git_diff_from_file_contents(tmp_path: Path) -> None:
+    repository(tmp_path)
+    manager = PatchManager(tmp_path)
+
+    patch = manager.from_file_changes(
+        [
+            {"path": "target.py", "operation": "upsert", "content": "value = 2\n"},
+            {"path": "new.py", "operation": "upsert", "content": "answer = 42\n"},
+        ]
+    )
+
+    assert "*** Add File" not in patch
+    assert manager.validate(patch) == ["target.py", "new.py"]
+
+
 def test_patch_requires_approval_and_exposes_rollback(tmp_path: Path) -> None:
     repository(tmp_path)
     with Juma(settings(tmp_path), model=PatchModel()) as juma:
