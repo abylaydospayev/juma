@@ -107,7 +107,14 @@ class PatchManager:
         files = self.files(patch)
         try:
             completed = subprocess.run(
-                ["git", "apply", "--check", "--whitespace=nowarn", "-"],
+                [
+                    "git",
+                    "apply",
+                    "--check",
+                    "--ignore-whitespace",
+                    "--whitespace=nowarn",
+                    "-",
+                ],
                 cwd=self.root,
                 input=patch,
                 capture_output=True,
@@ -129,7 +136,7 @@ class PatchManager:
             return {"status": "apply_failed", "files": [], "error": str(exc)}
         try:
             applied = subprocess.run(
-                ["git", "apply", "--whitespace=nowarn", "-"],
+                ["git", "apply", "--ignore-whitespace", "--whitespace=nowarn", "-"],
                 cwd=self.root,
                 input=patch,
                 capture_output=True,
@@ -150,7 +157,14 @@ class PatchManager:
         try:
             files = self.files(patch)
             reversed_patch = subprocess.run(
-                ["git", "apply", "--reverse", "--whitespace=nowarn", "-"],
+                [
+                    "git",
+                    "apply",
+                    "--ignore-whitespace",
+                    "--reverse",
+                    "--whitespace=nowarn",
+                    "-",
+                ],
                 cwd=self.root,
                 input=patch,
                 capture_output=True,
