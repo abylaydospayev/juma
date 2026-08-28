@@ -7,7 +7,8 @@ import os
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import Path as FastAPIPath
+from pydantic import BaseModel, Field
 
 from .service import Juma
 
@@ -24,6 +25,19 @@ class ActionRequest(BaseModel):
 
     feedback: str = ""
     action_fingerprint: str | None = None
+
+
+class PreferenceUpdate(BaseModel):
+    """Payload used to create or replace a user preference."""
+
+    value: str = Field(max_length=4000)
+
+
+class PreferenceResponse(BaseModel):
+    """A durable user preference."""
+
+    key: str
+    value: str
 
 
 class RunResponse(BaseModel):
@@ -217,6 +231,37 @@ def rollback_thread(thread_id: str, payload: ActionRequest) -> RollbackResponse:
                     action_fingerprint=payload.action_fingerprint,
                 )
             )
+    except ValueError as error:
+        raise _bad_request(error) from error
+
+
+@app.get(
+    "/preferences",
+    response_model=list[PreferenceResponse],
+    dependencies=[Depends(require_api_token)],
+)
+def list_preferences() -> list[PreferenceResponse]:
+    """Return the preferences currently used by Juma."""
+    with Juma() as juma:
+        return [
+            PreferenceResponse(key=key, value=value)
+            for key, value in juma.preference_values().items()
+        ]
+
+
+@app.put(
+    "/preferences/{key}",
+    response_model=PreferenceResponse,
+    dependencies=[Depends(require_api_token)],
+)
+def update_preference(
+    key: Annotated[str, FastAPIPath(min_length=1, max_length=80)],
+    payload: PreferenceUpdate,
+) -> PreferenceResponse:
+    """Create or replace one durable user preference."""
+    try:
+        with Juma() as juma:
+            return PreferenceResponse.model_validate(juma.set_preference(key, payload.value))
     except ValueError as error:
         raise _bad_request(error) from error
 

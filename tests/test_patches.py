@@ -255,7 +255,7 @@ def test_patch_requires_approval_and_exposes_rollback(tmp_path: Path) -> None:
         assert rolled_back["state"]["patch_result"]["status"] == "rolled_back"
         assert (tmp_path / "target.py").read_text(encoding="utf-8") == "value = 1\n"
 
-        with pytest.raises(ValueError, match="No failed patch"):
+        with pytest.raises(ValueError, match="exact action fingerprint"):
             juma.rollback("patch-thread")
 
 

@@ -64,6 +64,8 @@ class JumaState(TypedDict):
     target_agent: NotRequired[AgentName]
     route_confidence: NotRequired[float]
     route_reason: NotRequired[str]
+    plan: NotRequired[list[str]]
+    user_preferences: NotRequired[dict[str, str]]
     conversation_history: NotRequired[list[ConversationMessage]]
     memory_context: NotRequired[list[dict]]
     response: NotRequired[str]

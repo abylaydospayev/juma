@@ -85,6 +85,14 @@ class FakeJuma:
         )
         return {"thread_id": thread_id, "status": "completed", "state": {}}
 
+    def preference_values(self) -> dict[str, str]:
+        self.calls.append(("preferences", (), {}))
+        return {"response_style": "concise"}
+
+    def set_preference(self, key: str, value: str) -> dict[str, str]:
+        self.calls.append(("preference", (key, value), {}))
+        return {"key": key, "value": value}
+
 
 def install_fake(monkeypatch) -> None:
     FakeJuma.calls.clear()
@@ -238,6 +246,22 @@ def test_health_is_public_without_authentication(monkeypatch) -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_preferences_can_be_read_and_updated(monkeypatch) -> None:
+    install_fake(monkeypatch)
+
+    listed = client.get("/preferences", headers=AUTH_HEADERS)
+    updated = client.put(
+        "/preferences/response_style",
+        json={"value": "warm"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert listed.status_code == 200
+    assert listed.json() == [{"key": "response_style", "value": "concise"}]
+    assert updated.status_code == 200
+    assert updated.json() == {"key": "response_style", "value": "warm"}
+
+
 def test_protected_endpoint_rejects_missing_authentication(monkeypatch) -> None:
     monkeypatch.setenv("JUMA_API_TOKEN", "test-token")
 
@@ -309,9 +333,8 @@ def test_thread_lifecycle_persists_across_http_requests(
     assert history[0]["thread_id"] == thread_id
     assert history[0]["content"] == "research durable agent systems"
     assert history[1]["thread_id"] == thread_id
-    assert history[1]["content"] == (
-        "research answer: research durable agent systems"
-    )
+    assert history[1]["content"].startswith("research answer: research durable agent systems")
+    assert "Juma's execution plan:" in history[1]["content"]
 
     threads_response = client.get("/threads", headers=AUTH_HEADERS)
 

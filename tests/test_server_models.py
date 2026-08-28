@@ -7,6 +7,8 @@ from juma.server import (
     AskResponse,
     HealthResponse,
     HistoryMessage,
+    PreferenceResponse,
+    PreferenceUpdate,
     RejectionResponse,
     RollbackResponse,
     ThreadSummary,
@@ -33,6 +35,8 @@ def test_every_endpoint_declares_an_explicit_response_model() -> None:
             "/threads/{thread_id}/approve",
             "/threads/{thread_id}/reject",
             "/threads/{thread_id}/rollback",
+            "/preferences",
+            "/preferences/{key}",
             "/health",
         }
     }
@@ -44,6 +48,8 @@ def test_every_endpoint_declares_an_explicit_response_model() -> None:
         ("/threads/{thread_id}/approve", ("POST",)): ApprovalResponse,
         ("/threads/{thread_id}/reject", ("POST",)): RejectionResponse,
         ("/threads/{thread_id}/rollback", ("POST",)): RollbackResponse,
+        ("/preferences", ("GET",)): list[PreferenceResponse],
+        ("/preferences/{key}", ("PUT",)): PreferenceResponse,
         ("/health", ("GET",)): HealthResponse,
     }
 
@@ -85,6 +91,11 @@ def test_health_response_model_accepts_only_a_valid_shape() -> None:
 
     with pytest.raises(ValidationError):
         HealthResponse.model_validate({})
+
+
+def test_preference_models_validate_payloads() -> None:
+    assert PreferenceUpdate(value="concise").value == "concise"
+    assert PreferenceResponse.model_validate({"key": "style", "value": "concise"}).key == "style"
 
 
 def test_ask_rejects_missing_request() -> None:

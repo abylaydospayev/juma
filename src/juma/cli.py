@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
 from rich.json import JSON
 
+from .config import Settings
 from .models import JumaModelError
 from .service import Juma
+from .voice import VoiceError, VoiceService
 
 app = typer.Typer(name="juma", help="A small hierarchical multi-agent runtime.")
 console = Console()
@@ -128,6 +131,53 @@ def memories_command(
     with Juma() as juma:
         result = juma.memory.search(query, crew=crew) if query else juma.memory.recent(crew=crew)
         show({"memories": result})
+
+
+@app.command("preferences")
+def preferences_command() -> None:
+    """Show Juma's durable user preferences."""
+    with Juma() as juma:
+        show({"preferences": juma.preference_values()})
+
+
+@app.command("preference-set")
+def preference_set_command(key: str, value: str) -> None:
+    """Set a durable preference used by future requests."""
+    try:
+        with Juma() as juma:
+            show(juma.set_preference(key, value))
+    except ValueError as error:
+        show_runtime_error(error)
+        raise typer.Exit(2) from None
+
+
+@app.command("voice-transcribe")
+def voice_transcribe_command(audio_file: Path) -> None:
+    """Transcribe a local audio recording into a Juma request."""
+    try:
+        settings = Settings.from_env()
+        text = VoiceService(settings).transcribe(
+            audio_file.read_bytes(), filename=audio_file.name
+        )
+        show({"text": text})
+    except (OSError, VoiceError) as error:
+        console.print(f"[red]Voice error:[/red] {error}")
+        raise typer.Exit(2) from None
+
+
+@app.command("voice-speak")
+def voice_speak_command(
+    text: str,
+    output: Annotated[Path, typer.Option(help="Output MP3 path.")] = Path("juma-response.mp3"),
+) -> None:
+    """Synthesize Juma's response as an MP3 file."""
+    try:
+        settings = Settings.from_env()
+        VoiceService(settings).synthesize_to_file(text, output)
+        show({"file": str(output), "created": True})
+    except (OSError, VoiceError) as error:
+        console.print(f"[red]Voice error:[/red] {error}")
+        raise typer.Exit(2) from None
 
 
 if __name__ == "__main__":

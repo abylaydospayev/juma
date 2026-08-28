@@ -18,7 +18,11 @@ The current runtime includes:
 - OpenAI Responses API with `gpt-5.6-luna` by default.
 - Structured routing with an inspectable crew, confidence, and reason.
 - Persistent conversation history in SQLite.
+- A bounded command loop that forms an inspectable plan, chooses practical defaults, and reports
+  progress before handing work to one crew.
 - Ranked shared-memory recall and explicit "Remember this" support in the UI.
+- Durable user preferences shared with future requests.
+- Optional OpenAI speech transcription and response audio in the UI and CLI.
 - Live web search for the research crew, with source links when returned by the API.
 - Read-only workspace tools for the coding crew: list, read, search, and fixed checks.
 - Path traversal protection and fixed command allowlists for workspace tools.
@@ -66,6 +70,7 @@ JUMA_REASONING_EFFORT=medium
 JUMA_ENABLE_WEB_SEARCH=true
 JUMA_API_TOKEN=use-a-long-random-local-token
 JUMA_WORKSPACE_ROOT=C:\path\to\the\project
+JUMA_VOICE_ENABLED=false
 ```
 
 Alternatively set `OPENAI_API_KEY` and `JUMA_API_TOKEN` in the current PowerShell session. Never
@@ -83,6 +88,8 @@ juma reject cleanup-1 --feedback "Keep it for 30 days"
 
 juma remember coding "The router is deterministic unless a model route is available"
 juma memories router --crew admin
+juma preference-set response_style "concise but warm"
+juma preferences
 ```
 
 Risky actions pause. For a coding change, review the displayed patch and fingerprint, then resume
@@ -121,10 +128,18 @@ Or run Streamlit directly:
 streamlit run src/juma/ui.py
 ```
 
-The UI keeps durable chat history, displays the selected crew and routing confidence, shows
-activity, previews generated diffs with their fingerprints, supports approval decisions, runs and
-displays post-change tests, offers rollback after failures, lets you save useful answers to shared
-memory, and searches shared memory in the sidebar.
+The UI keeps durable chat history, displays Juma's execution plan, selected crew, and routing
+confidence, shows activity, previews generated diffs with their fingerprints, supports approval
+decisions, runs and displays post-change tests, offers rollback after failures, lets you save useful
+answers to shared memory, and searches shared memory in the sidebar.
+
+To enable voice input and spoken responses, set `JUMA_VOICE_ENABLED=true`. The UI then provides a
+recording control, and the CLI can transcribe or synthesize audio:
+
+```powershell
+juma voice-transcribe .\request.wav
+juma voice-speak "Your request is complete." --output .\reply.mp3
+```
 
 ## MCP memory server
 
@@ -145,7 +160,8 @@ mcp dev src/juma/mcp_server.py --with-editable .
 `JUMA_DATA_DIR` moves the SQLite databases and audit log. Other optional settings are
 `JUMA_OPENAI_MODEL`, `JUMA_REASONING_EFFORT`, `JUMA_MAX_OUTPUT_TOKENS`,
 `JUMA_ENABLE_WEB_SEARCH`, `JUMA_MAX_TOOL_ROUNDS`, `JUMA_MAX_RETRIES`,
-`JUMA_REQUEST_TIMEOUT`, `JUMA_WORKSPACE_ROOT`, and `JUMA_API_TOKEN`.
+`JUMA_REQUEST_TIMEOUT`, `JUMA_WORKSPACE_ROOT`, `JUMA_API_TOKEN`, `JUMA_VOICE_ENABLED`,
+`JUMA_VOICE_TRANSCRIPTION_MODEL`, `JUMA_VOICE_SPEECH_MODEL`, and `JUMA_VOICE_NAME`.
 
 Autonomous repair is off by default. To enable a bounded local repair-and-commit workflow, use a
 clean Git checkout and set `JUMA_AUTO_REPAIR=true`, `JUMA_MAX_REPAIR_ATTEMPTS=3`, and

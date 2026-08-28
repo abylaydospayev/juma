@@ -10,6 +10,7 @@ from .crews import build_admin_crew, build_coding_crew, build_research_crew
 from .memory import MemoryStore
 from .models import JumaModelError, ModelClient
 from .patches import PatchError, PatchManager
+from .planner import build_plan
 from .router import route_node, selected_crew
 from .safety import approval_gate
 from .state import JumaState
@@ -44,6 +45,18 @@ def build_graph(
 
     builder = StateGraph(JumaState)
     builder.add_node("router", lambda state: route_node(state, model=model))
+    builder.add_node(
+        "planner",
+        lambda state: {
+            "plan": build_plan(state["request"], state["target_agent"]),
+            "events": [
+                {
+                    "source": "juma",
+                    "message": "Juma formed a bounded execution plan.",
+                }
+            ],
+        },
+    )
     builder.add_node("coding", lambda state: invoke_crew("coding", state))
     builder.add_node("research", lambda state: invoke_crew("research", state))
     builder.add_node("admin", lambda state: invoke_crew("admin", state))
@@ -177,8 +190,9 @@ def build_graph(
     builder.add_node("execute_patch", execute_patch)
 
     builder.add_edge(START, "router")
+    builder.add_edge("router", "planner")
     builder.add_conditional_edges(
-        "router",
+        "planner",
         selected_crew,
         {"coding": "coding", "research": "research", "admin": "admin"},
     )

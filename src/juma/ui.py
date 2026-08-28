@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import uuid
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ import streamlit as st
 from juma.identity import CREATOR_NAME, JUMA_NAME, TAGLINE
 from juma.models import JumaModelError
 from juma.service import Juma
+from juma.voice import VoiceError, VoiceService
 
 
 def normalize_display_text(text: str) -> str:
@@ -42,6 +44,7 @@ def load_messages(thread_id: str) -> list[dict[str, Any]]:
             "interrupt": row["metadata"].get("interrupt"),
             "route_confidence": row["metadata"].get("route_confidence"),
             "route_reason": row["metadata"].get("route_reason"),
+            "plan": row["metadata"].get("plan", []),
             "action": row["metadata"].get("action"),
             "patch_result": row["metadata"].get("patch_result"),
             "rollback_available": row["metadata"].get("rollback_available", False),
@@ -77,6 +80,7 @@ def update_assistant(message: dict[str, Any], result: dict[str, Any]) -> None:
             "interrupt": result.get("interrupts", [None])[0],
             "route_confidence": state.get("route_confidence"),
             "route_reason": state.get("route_reason"),
+            "plan": state.get("plan", []),
             "action": state.get("proposed_action"),
             "patch_result": state.get("patch_result"),
             "rollback_available": state.get("rollback_available", False),
@@ -87,6 +91,8 @@ def update_assistant(message: dict[str, Any], result: dict[str, Any]) -> None:
 def render_message(message: dict[str, Any], index: int) -> None:
     with st.chat_message(message["role"]):
         st.markdown(normalize_display_text(message["content"]))
+        if message.get("audio"):
+            st.audio(message["audio"], format="audio/mp3")
         if message["role"] == "assistant":
             agent = message.get("agent") or "juma"
             status = (message.get("status") or "completed").replace("_", " ")
@@ -94,6 +100,11 @@ def render_message(message: dict[str, Any], index: int) -> None:
             confidence = message.get("route_confidence")
             if confidence is not None:
                 st.caption(f"Route confidence: {confidence:.0%}")
+            plan = message.get("plan", [])
+            if plan:
+                with st.expander("Juma's plan", expanded=False):
+                    for step in plan:
+                        st.write(f"- {step}")
             action = message.get("action") or (message.get("interrupt") or {}).get("action")
             if action and action.get("patch"):
                 with st.expander(
@@ -243,10 +254,42 @@ def sidebar() -> None:
             else:
                 st.caption("No matching memories.")
 
+        st.subheader("Preferences")
+        with st.form("preference-form", clear_on_submit=True):
+            preference_key = st.text_input("Name", placeholder="response_style")
+            preference_value = st.text_input("Value", placeholder="concise but warm")
+            save_preference = st.form_submit_button("Save preference")
+        if save_preference:
+            try:
+                st.session_state.juma.set_preference(preference_key, preference_value)
+                st.toast("Preference saved")
+            except ValueError as error:
+                st.error(str(error))
+        preferences = st.session_state.juma.preference_values()
+        if preferences:
+            for key, value in preferences.items():
+                st.caption(f"{key}: {value}")
+
         settings = st.session_state.juma.settings
         st.divider()
         st.caption(f"Model: {settings.openai_model}")
         st.caption(f"Live research: {'on' if settings.enable_web_search else 'off'}")
+        if settings.voice_enabled:
+            recording = st.audio_input("Speak to Juma", key="voice_input")
+            if recording is not None:
+                audio = recording.getvalue()
+                digest = sha256(audio).hexdigest()
+                if digest != st.session_state.get("last_voice_digest"):
+                    try:
+                        with st.spinner("Juma is listening..."):
+                            st.session_state.voice_prompt = VoiceService(settings).transcribe(
+                                audio,
+                                filename=recording.name or "juma-recording.wav",
+                                content_type=recording.type or "audio/wav",
+                            )
+                        st.session_state.last_voice_digest = digest
+                    except VoiceError as error:
+                        st.error(str(error))
         st.caption("Risky actions always require approval.")
 
 
@@ -277,10 +320,12 @@ def app() -> None:
     if pending:
         render_approval(pending)
 
-    prompt = st.chat_input(
-        "What would you like juma to do?",
-        disabled=pending is not None,
-    )
+    prompt = st.session_state.pop("voice_prompt", None)
+    if prompt is None:
+        prompt = st.chat_input(
+            "What would you like juma to do?",
+            disabled=pending is not None,
+        )
     if not prompt:
         return
 
@@ -294,6 +339,13 @@ def app() -> None:
             result = st.session_state.juma.ask(prompt, thread_id=st.session_state.thread_id)
         assistant_message: dict[str, Any] = {"role": "assistant"}
         update_assistant(assistant_message, result)
+        if st.session_state.juma.settings.voice_enabled:
+            try:
+                assistant_message["audio"] = VoiceService(
+                    st.session_state.juma.settings
+                ).synthesize(assistant_message["content"])
+            except VoiceError as error:
+                st.warning(str(error))
         st.session_state.messages.append(assistant_message)
         st.rerun()
     except JumaModelError as error:

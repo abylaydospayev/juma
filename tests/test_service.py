@@ -31,9 +31,19 @@ def test_safe_request_completes(tmp_path: Path) -> None:
     assert result["state"]["target_agent"] == "research"
     assert [event["source"] for event in result["state"]["events"]] == [
         "router",
+        "juma",
         "research",
         "safety",
     ]
+
+
+def test_preferences_are_included_in_future_requests(tmp_path: Path) -> None:
+    with Juma(settings(tmp_path), model=FakeModel()) as juma:
+        juma.set_preference("response_style", "concise")
+        result = juma.ask("research durable agent systems", thread_id="preferred")
+
+    assert "User preferences:" in result["state"]["response"]
+    assert "response_style: concise" in result["state"]["response"]
 
 
 def test_risky_request_pauses_and_resumes(tmp_path: Path) -> None:
@@ -47,6 +57,22 @@ def test_risky_request_pauses_and_resumes(tmp_path: Path) -> None:
         finished = juma.resume("risky", approved=False, feedback="Keep the logs")
     assert finished["status"] == "rejected"
     assert "Keep the logs" in finished["state"]["response"]
+
+
+def test_repeated_approval_requires_the_same_decision_and_feedback() -> None:
+    state = {
+        "proposed_action": {"kind": "external.communication"},
+        "approval": {
+            "approved": False,
+            "feedback": "Keep the draft",
+            "action_fingerprint": "fingerprint",
+        },
+    }
+
+    assert Juma._is_idempotent_approval(state, False, "Keep the draft", None)
+    assert not Juma._is_idempotent_approval(state, True, "Keep the draft", None)
+    assert not Juma._is_idempotent_approval(state, False, "Different", None)
+    assert not Juma._is_idempotent_approval(state, False, "Keep the draft", "wrong")
 
 
 def test_failed_thread_cannot_be_approved_or_rerun(tmp_path: Path) -> None:
