@@ -9,6 +9,7 @@ description = "A small, hierarchical multi-agent system with durable human appro
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "fastapi>=0.115,<1",
   "langgraph>=1.2,<2",
   "langgraph-checkpoint-sqlite>=3.1,<4",
   "mcp[cli]>=2.1,<3",
@@ -21,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "httpx>=0.27,<1",
   "pytest>=8,<10",
   "ruff>=0.12,<1",
 ]
