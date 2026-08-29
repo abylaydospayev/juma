@@ -71,6 +71,8 @@ JUMA_ENABLE_WEB_SEARCH=true
 JUMA_API_TOKEN=use-a-long-random-local-token
 JUMA_WORKSPACE_ROOT=C:\path\to\the\project
 JUMA_VOICE_ENABLED=false
+JUMA_SERVER_HOST=127.0.0.1
+JUMA_SERVER_PORT=8000
 ```
 
 Alternatively set `OPENAI_API_KEY` and `JUMA_API_TOKEN` in the current PowerShell session. Never
@@ -141,6 +143,11 @@ juma voice-transcribe .\request.wav
 juma voice-speak "Your request is complete." --output .\reply.mp3
 ```
 
+For private phone access through Tailscale, install Tailscale on the computer and phone, set
+`JUMA_SERVER_HOST=0.0.0.0`, and start the UI with `juma-ui --server.address 0.0.0.0`. Open
+`http://<computer-tailscale-ip>:8501` on the phone. Keep the computer awake and keep
+`JUMA_API_TOKEN` configured. The default server host remains `127.0.0.1`.
+
 ## MCP memory server
 
 Run the memory MCP server over local stdio:
@@ -161,7 +168,8 @@ mcp dev src/juma/mcp_server.py --with-editable .
 `JUMA_OPENAI_MODEL`, `JUMA_REASONING_EFFORT`, `JUMA_MAX_OUTPUT_TOKENS`,
 `JUMA_ENABLE_WEB_SEARCH`, `JUMA_MAX_TOOL_ROUNDS`, `JUMA_MAX_RETRIES`,
 `JUMA_REQUEST_TIMEOUT`, `JUMA_WORKSPACE_ROOT`, `JUMA_API_TOKEN`, `JUMA_VOICE_ENABLED`,
-`JUMA_VOICE_TRANSCRIPTION_MODEL`, `JUMA_VOICE_SPEECH_MODEL`, and `JUMA_VOICE_NAME`.
+`JUMA_VOICE_TRANSCRIPTION_MODEL`, `JUMA_VOICE_SPEECH_MODEL`, `JUMA_VOICE_NAME`,
+`JUMA_SERVER_HOST`, and `JUMA_SERVER_PORT`.
 
 Autonomous repair is off by default. To enable a bounded local repair-and-commit workflow, use a
 clean Git checkout and set `JUMA_AUTO_REPAIR=true`, `JUMA_MAX_REPAIR_ATTEMPTS=3`, and

@@ -24,6 +24,8 @@ class Settings:
     voice_transcription_model: str = "gpt-4o-mini-transcribe"
     voice_speech_model: str = "gpt-4o-mini-tts"
     voice_name: str = "alloy"
+    server_host: str = "127.0.0.1"
+    server_port: int = 8000
     auto_repair: bool = False
     max_repair_attempts: int = 3
     auto_commit: bool = False
@@ -68,6 +70,8 @@ class Settings:
             ),
             voice_speech_model=os.getenv("JUMA_VOICE_SPEECH_MODEL", "gpt-4o-mini-tts"),
             voice_name=os.getenv("JUMA_VOICE_NAME", "alloy"),
+            server_host=os.getenv("JUMA_SERVER_HOST", "127.0.0.1"),
+            server_port=int(os.getenv("JUMA_SERVER_PORT", "8000")),
             auto_repair=os.getenv("JUMA_AUTO_REPAIR", "false").lower()
             in {"1", "true", "yes", "on"},
             max_repair_attempts=max(0, int(os.getenv("JUMA_MAX_REPAIR_ATTEMPTS", "3"))),

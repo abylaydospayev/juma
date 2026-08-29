@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi import Path as FastAPIPath
 from pydantic import BaseModel, Field
 
+from .config import Settings
 from .service import Juma
 
 
@@ -276,4 +277,5 @@ def main() -> None:
     """Run the juma HTTP server locally."""
     import uvicorn
 
-    uvicorn.run("juma.server:app", host="127.0.0.1", port=8000)
+    settings = Settings.from_env()
+    uvicorn.run("juma.server:app", host=settings.server_host, port=settings.server_port)
