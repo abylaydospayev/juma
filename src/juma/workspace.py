@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
+from .environment import ProjectEnvironment
+
 IGNORED_PARTS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "data"}
 MAX_READ_BYTES = 200_000
+
+
+def is_ignored_part(part: str) -> bool:
+    """Identify runtime and secret-bearing paths that tools must not expose."""
+    return part in IGNORED_PARTS or part == ".env" or part.startswith(".env.")
 
 
 WORKSPACE_TOOLS: list[dict[str, Any]] = [
@@ -67,8 +73,19 @@ WORKSPACE_TOOLS: list[dict[str, Any]] = [
 class WorkspaceTools:
     """Read-only workspace tools with path traversal and command restrictions."""
 
-    def __init__(self, root: Path):
+    def __init__(
+        self,
+        root: Path,
+        *,
+        auto_setup_environment: bool = False,
+        environment_timeout: float = 600.0,
+    ):
         self.root = root.resolve()
+        self.environment = ProjectEnvironment(
+            self.root,
+            auto_setup=auto_setup_environment,
+            timeout=environment_timeout,
+        )
 
     def _safe_path(self, relative_path: str) -> Path:
         candidate = (self.root / (relative_path or ".")).resolve()
@@ -76,7 +93,7 @@ class WorkspaceTools:
             candidate.relative_to(self.root)
         except ValueError as exc:
             raise ValueError("Path is outside the configured workspace.") from exc
-        if any(part in IGNORED_PARTS for part in candidate.relative_to(self.root).parts):
+        if any(is_ignored_part(part) for part in candidate.relative_to(self.root).parts):
             raise ValueError("That workspace directory is excluded from inspection.")
         return candidate
 
@@ -86,7 +103,7 @@ class WorkspaceTools:
             raise ValueError(f"Not a directory: {directory}")
         files = []
         for child in sorted(path.iterdir()):
-            if child.name in IGNORED_PARTS:
+            if is_ignored_part(child.name):
                 continue
             files.append(str(child.relative_to(self.root)))
             if len(files) >= 200:
@@ -109,7 +126,7 @@ class WorkspaceTools:
             raise ValueError(f"Not a directory: {directory}")
         matches: list[dict[str, Any]] = []
         for path in base.rglob("*"):
-            if not path.is_file() or any(part in IGNORED_PARTS for part in path.parts):
+            if not path.is_file() or any(is_ignored_part(part) for part in path.parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
@@ -130,14 +147,23 @@ class WorkspaceTools:
 
     def run_checks(self, check: str) -> dict[str, Any]:
         commands = {
-            "tests": [sys.executable, "-m", "pytest", "-q"],
-            "lint": [sys.executable, "-m", "ruff", "check", "."],
-            "compile": [sys.executable, "-m", "compileall", "-q", "src"],
+            "tests": ["-m", "pytest", "-q"],
+            "lint": ["-m", "ruff", "check", "."],
+            "compile": ["-m", "compileall", "-q", "src"],
         }
         if check not in commands:
             raise ValueError(f"Unsupported check: {check}")
+        environment = self.environment.prepare()
+        if environment["status"] != "ready":
+            return {
+                "check": check,
+                "return_code": -1,
+                "output": environment.get("error", "Project environment setup failed."),
+                "environment": environment,
+            }
+        python = environment["python"]
         completed = subprocess.run(
-            commands[check],
+            [python, *commands[check]],
             cwd=self.root,
             capture_output=True,
             text=True,
@@ -145,7 +171,12 @@ class WorkspaceTools:
             check=False,
         )
         output = (completed.stdout + completed.stderr)[-12_000:]
-        return {"check": check, "return_code": completed.returncode, "output": output}
+        return {
+            "check": check,
+            "return_code": completed.returncode,
+            "output": output,
+            "environment": environment,
+        }
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         handlers = {

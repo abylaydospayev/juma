@@ -29,6 +29,10 @@ class Settings:
     auto_repair: bool = False
     max_repair_attempts: int = 3
     auto_commit: bool = False
+    auto_push: bool = False
+    push_remote: str = "origin"
+    auto_setup_environment: bool = False
+    environment_timeout: float = 600.0
 
     @property
     def resolved_workspace_root(self) -> Path:
@@ -77,6 +81,12 @@ class Settings:
             max_repair_attempts=max(0, int(os.getenv("JUMA_MAX_REPAIR_ATTEMPTS", "3"))),
             auto_commit=os.getenv("JUMA_AUTO_COMMIT", "false").lower()
             in {"1", "true", "yes", "on"},
+            auto_push=os.getenv("JUMA_AUTO_PUSH", "false").lower()
+            in {"1", "true", "yes", "on"},
+            push_remote=os.getenv("JUMA_PUSH_REMOTE", "origin"),
+            auto_setup_environment=os.getenv("JUMA_AUTO_SETUP", "false").lower()
+            in {"1", "true", "yes", "on"},
+            environment_timeout=float(os.getenv("JUMA_ENVIRONMENT_TIMEOUT", "600")),
         )
 
     def ensure_directories(self) -> None:

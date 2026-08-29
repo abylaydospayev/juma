@@ -68,7 +68,9 @@ def build_graph(
             return {}
         events = []
         branch: str | None = None
-        autonomous = bool(settings and (settings.auto_repair or settings.auto_commit))
+        autonomous = bool(
+            settings and (settings.auto_repair or settings.auto_commit or settings.auto_push)
+        )
         if autonomous:
             branch_result = patch_manager.prepare_autonomous_branch(action.get("fingerprint", ""))
             if branch_result["status"] != "ready":
@@ -144,6 +146,34 @@ def build_graph(
                         "message": f"Automatic commit failed: {commit['error']}",
                     }
                 )
+            if commit["status"] == "committed" and settings.auto_push:
+                push = patch_manager.push(settings.push_remote, expected_branch=branch)
+                result["push"] = push
+                if push["status"] == "pushed":
+                    events.append(
+                        {
+                            "source": "push",
+                            "message": f"Pushed {push['branch']} to {push['remote']}.",
+                        }
+                    )
+                else:
+                    events.append(
+                        {
+                            "source": "push",
+                            "message": f"Automatic push failed: {push['error']}",
+                        }
+                    )
+        elif result["status"] == "applied_tests_passed" and settings and settings.auto_push:
+            result["push"] = {
+                "status": "push_failed",
+                "error": "Automatic pushes require JUMA_AUTO_COMMIT=true.",
+            }
+            events.append(
+                {
+                    "source": "push",
+                    "message": "Automatic push skipped because automatic commits are disabled.",
+                }
+            )
 
         if result["status"] == "applied_tests_passed":
             response = state["response"] + " The approved patch was applied and all tests passed."
@@ -153,6 +183,13 @@ def build_graph(
                 response += f" Commit created on {result['commit']['branch']}."
             elif result.get("commit", {}).get("status") == "commit_failed":
                 response += f" Automatic commit failed: {result['commit']['error']}"
+            if result.get("push", {}).get("status") == "pushed":
+                response += (
+                    f" Branch pushed to {result['push']['remote']} as "
+                    f"{result['push']['branch']}."
+                )
+            elif result.get("push", {}).get("status") == "push_failed":
+                response += f" Automatic push failed: {result['push']['error']}"
             status = "completed"
         elif result["status"] == "applied_tests_failed":
             response = (

@@ -73,6 +73,12 @@ JUMA_WORKSPACE_ROOT=C:\path\to\the\project
 JUMA_VOICE_ENABLED=false
 JUMA_SERVER_HOST=127.0.0.1
 JUMA_SERVER_PORT=8000
+JUMA_AUTO_SETUP=false
+JUMA_AUTO_REPAIR=false
+JUMA_MAX_REPAIR_ATTEMPTS=3
+JUMA_AUTO_COMMIT=false
+JUMA_AUTO_PUSH=false
+JUMA_PUSH_REMOTE=origin
 ```
 
 Alternatively set `OPENAI_API_KEY` and `JUMA_API_TOKEN` in the current PowerShell session. Never
@@ -169,11 +175,22 @@ mcp dev src/juma/mcp_server.py --with-editable .
 `JUMA_ENABLE_WEB_SEARCH`, `JUMA_MAX_TOOL_ROUNDS`, `JUMA_MAX_RETRIES`,
 `JUMA_REQUEST_TIMEOUT`, `JUMA_WORKSPACE_ROOT`, `JUMA_API_TOKEN`, `JUMA_VOICE_ENABLED`,
 `JUMA_VOICE_TRANSCRIPTION_MODEL`, `JUMA_VOICE_SPEECH_MODEL`, `JUMA_VOICE_NAME`,
-`JUMA_SERVER_HOST`, and `JUMA_SERVER_PORT`.
+`JUMA_SERVER_HOST`, `JUMA_SERVER_PORT`, `JUMA_AUTO_SETUP`, `JUMA_ENVIRONMENT_TIMEOUT`,
+`JUMA_AUTO_REPAIR`, `JUMA_MAX_REPAIR_ATTEMPTS`, `JUMA_AUTO_COMMIT`, `JUMA_AUTO_PUSH`, and
+`JUMA_PUSH_REMOTE`.
 
 Autonomous repair is off by default. To enable a bounded local repair-and-commit workflow, use a
 clean Git checkout and set `JUMA_AUTO_REPAIR=true`, `JUMA_MAX_REPAIR_ATTEMPTS=3`, and
 `JUMA_AUTO_COMMIT=true`. Juma creates a `juma/auto/<fingerprint>` branch, applies the approved
 patch, sends failing test output back to the coding crew, and retries only within the original file
-scope. It commits only after tests pass; it never pushes or deploys. If the retry limit is reached,
-the failed patch remains available for fingerprint-protected rollback.
+scope. It commits only after tests pass. Set `JUMA_AUTO_PUSH=true` to push that committed branch to
+`JUMA_PUSH_REMOTE` (default `origin`). Juma never force-pushes, pushes `main`, merges, or deploys.
+The remote must already be configured in Git. If the retry limit is reached, the failed patch
+remains available for fingerprint-protected rollback.
+
+Checks normally use the project `.venv` or `venv` interpreter when one exists. Set
+`JUMA_AUTO_SETUP=true` when a project needs a fresh environment; Juma creates a temporary virtual
+environment outside the source tree and installs the project from `pyproject.toml` or
+`requirements.txt` before running the fixed tests, lint, or compile checks. Environment setup is
+bounded by `JUMA_ENVIRONMENT_TIMEOUT` seconds and is never performed during a research or admin
+request unless a coding check is actually run.

@@ -21,14 +21,20 @@ class CrossProcessLock:
         self._handle = None
 
     def acquire(self) -> None:
+        if self._handle is not None:
+            raise RuntimeError("This lock is already acquired.")
+
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = self.path.open("a+b")
-        handle.seek(0, os.SEEK_END)
-        if handle.tell() == 0:
-            handle.write(b"0")
-            handle.flush()
-        handle.seek(0)
+        self.path.touch(exist_ok=True)
+        handle = self.path.open("r+b")
         try:
+            handle.seek(0)
+            if handle.read(1) == b"":
+                handle.seek(0)
+                handle.write(b"0")
+                handle.flush()
+
+            handle.seek(0)
             if os.name == "nt":
                 import msvcrt
 

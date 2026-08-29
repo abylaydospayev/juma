@@ -206,6 +206,31 @@ def test_patch_manager_builds_exact_git_diff_from_file_contents(tmp_path: Path) 
     assert manager.validate(patch) == ["new.py", "target.py"]
 
 
+def test_patch_manager_pushes_only_a_dedicated_juma_branch(tmp_path: Path) -> None:
+    repository(tmp_path)
+    remote = tmp_path.parent / f"{tmp_path.name}-remote.git"
+    remote.mkdir()
+    git("init", "--bare", cwd=remote)
+    git("remote", "add", "origin", str(remote), cwd=tmp_path)
+
+    manager = PatchManager(tmp_path)
+    branch = manager.prepare_autonomous_branch("a" * 64)["branch"]
+    (tmp_path / "target.py").write_text("value = 2\n", encoding="utf-8")
+    commit = manager.commit(["target.py"], "juma: test push", expected_branch=branch)
+
+    assert commit["status"] == "committed"
+    pushed = manager.push("origin", expected_branch=branch)
+
+    assert pushed == {"status": "pushed", "remote": "origin", "branch": branch}
+    ref = subprocess.run(
+        ["git", "--git-dir", str(remote), "show-ref", "--verify", f"refs/heads/{branch}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ref.returncode == 0
+
+
 def test_patch_extraction_preserves_trailing_blank_context(tmp_path: Path) -> None:
     repository(tmp_path)
     target = tmp_path / "target.py"
@@ -261,6 +286,10 @@ def test_patch_requires_approval_and_exposes_rollback(tmp_path: Path) -> None:
 
 def test_autonomous_repair_commits_only_after_tests_pass(tmp_path: Path) -> None:
     repair_repository(tmp_path)
+    remote = tmp_path.parent / f"{tmp_path.name}-auto-remote.git"
+    remote.mkdir()
+    git("init", "--bare", cwd=remote)
+    git("remote", "add", "origin", str(remote), cwd=tmp_path)
     data_dir = tmp_path.parent / f"{tmp_path.name}-runtime"
     auto_settings = Settings(
         data_dir,
@@ -270,6 +299,7 @@ def test_autonomous_repair_commits_only_after_tests_pass(tmp_path: Path) -> None
         auto_repair=True,
         max_repair_attempts=2,
         auto_commit=True,
+        auto_push=True,
     )
     model = AutoRepairModel()
 
@@ -289,6 +319,7 @@ def test_autonomous_repair_commits_only_after_tests_pass(tmp_path: Path) -> None
         "applied_tests_passed"
     )
     assert finished["state"]["patch_result"]["commit"]["status"] == "committed"
+    assert finished["state"]["patch_result"]["push"]["status"] == "pushed"
     assert finished["state"]["proposed_action"]["fingerprint"] != fingerprint
     assert (tmp_path / "target.py").read_text(encoding="utf-8") == (
         "def value():\n    return 2\n"

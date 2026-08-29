@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .workspace import IGNORED_PARTS, WorkspaceTools
+from .workspace import WorkspaceTools, is_ignored_part
 
 
 class PatchError(ValueError):
@@ -17,9 +17,19 @@ class PatchError(ValueError):
 class PatchManager:
     """Validate, apply, test, and reverse approved Git unified diffs."""
 
-    def __init__(self, root: Path):
+    def __init__(
+        self,
+        root: Path,
+        *,
+        auto_setup_environment: bool = False,
+        environment_timeout: float = 600.0,
+    ):
         self.root = root.resolve()
-        self.workspace = WorkspaceTools(self.root)
+        self.workspace = WorkspaceTools(
+            self.root,
+            auto_setup_environment=auto_setup_environment,
+            environment_timeout=environment_timeout,
+        )
 
     @classmethod
     def cwd(cls) -> PatchManager:
@@ -197,6 +207,72 @@ class PatchManager:
             }
         except (OSError, subprocess.SubprocessError, PatchError) as exc:
             return {"status": "commit_failed", "error": str(exc)}
+
+    def push(
+        self,
+        remote: str,
+        *,
+        expected_branch: str | None = None,
+    ) -> dict[str, Any]:
+        """Push only a committed, dedicated Juma branch to an explicit remote."""
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", remote):
+            return {"status": "push_failed", "error": "Invalid Git remote name."}
+        try:
+            branch = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            current_branch = branch.stdout.strip()
+            if branch.returncode or not re.fullmatch(r"juma/auto/[0-9a-f]{64}", current_branch):
+                return {
+                    "status": "push_failed",
+                    "error": "Automatic pushes are allowed only for a Juma autonomous branch.",
+                }
+            if expected_branch is not None and current_branch != expected_branch:
+                return {
+                    "status": "push_failed",
+                    "error": f"The autonomous branch changed unexpectedly: {current_branch}.",
+                }
+            configured = subprocess.run(
+                ["git", "remote", "get-url", remote],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if configured.returncode:
+                return {
+                    "status": "push_failed",
+                    "error": f"Git remote {remote!r} is not configured.",
+                }
+            pushed = subprocess.run(
+                ["git", "push", "--set-upstream", remote, current_branch],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            if pushed.returncode:
+                detail = self._redact_git_detail(pushed.stderr or pushed.stdout)
+                return {
+                    "status": "push_failed",
+                    "remote": remote,
+                    "branch": current_branch,
+                    "error": detail or "Git push failed.",
+                }
+            return {"status": "pushed", "remote": remote, "branch": current_branch}
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"status": "push_failed", "remote": remote, "error": str(exc)}
+
+    @staticmethod
+    def _redact_git_detail(detail: str) -> str:
+        return re.sub(r"(https?://)([^\s/@]+@)", r"\1<credentials>@", detail.strip())
 
     @staticmethod
     def extract(response: str) -> str | None:
@@ -506,5 +582,5 @@ class PatchManager:
             candidate.relative_to(self.root)
         except ValueError as exc:
             raise PatchError("The patch contains a path outside the workspace.") from exc
-        if any(part in IGNORED_PARTS for part in Path(relative_path).parts):
+        if any(is_ignored_part(part) for part in Path(relative_path).parts):
             raise PatchError("The patch targets an excluded workspace directory.")

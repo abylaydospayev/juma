@@ -20,6 +20,7 @@ from .memory import MemoryStore
 from .models import ModelClient, OpenAIResponsesModel
 from .patches import PatchManager
 from .preferences import PreferenceStore
+from .router import route_request
 
 
 class Juma:
@@ -38,7 +39,11 @@ class Juma:
         self.conversations = ConversationStore(self.settings.data_dir / "conversations.sqlite")
         self.preferences = PreferenceStore(self.settings.preferences_db)
         self.audit = AuditLog(self.settings.audit_log)
-        self.patch_manager = PatchManager(self.settings.resolved_workspace_root)
+        self.patch_manager = PatchManager(
+            self.settings.resolved_workspace_root,
+            auto_setup_environment=self.settings.auto_setup_environment,
+            environment_timeout=self.settings.environment_timeout,
+        )
         self.graph = build_graph(
             self.checkpointer,
             self.model,
@@ -84,16 +89,20 @@ class Juma:
             yield
 
     def _execution_guard(self, thread_id: str):
-        return self._guard(
-            [
-                f"workspace:{self.patch_manager.root}",
-                f"thread:{thread_id}",
-            ]
-        )
+        return self._guard([f"workspace:{self.patch_manager.root}", f"thread:{thread_id}"])
+
+    def _thread_guard(self, thread_id: str):
+        return self._guard([f"thread:{thread_id}"])
+
+    def _request_guard(self, request: str, thread_id: str):
+        """Avoid serializing unrelated research/admin work on the coding workspace."""
+        if route_request(request)["target_agent"] == "coding":
+            return self._execution_guard(thread_id)
+        return self._thread_guard(thread_id)
 
     def ask(self, request: str, *, thread_id: str | None = None) -> dict[str, Any]:
         thread_id = thread_id or str(uuid.uuid4())
-        with self._execution_guard(thread_id):
+        with self._request_guard(request, thread_id):
             history = self.conversations.history(thread_id, limit=20)
             self.audit.record(
                 "run_started",
@@ -157,7 +166,14 @@ class Juma:
         feedback: str = "",
         action_fingerprint: str | None = None,
     ) -> dict[str, Any]:
-        with self._execution_guard(thread_id):
+        snapshot = self.graph.get_state(self._config(thread_id))
+        proposed = dict(snapshot.values).get("proposed_action") or {}
+        guard = (
+            self._execution_guard(thread_id)
+            if proposed.get("kind") == "code.patch"
+            else self._thread_guard(thread_id)
+        )
+        with guard:
             snapshot = self.graph.get_state(self._config(thread_id))
             interrupts = [
                 item

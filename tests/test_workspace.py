@@ -22,6 +22,18 @@ def test_workspace_tools_exclude_runtime_directories(tmp_path: Path) -> None:
         WorkspaceTools(tmp_path).list_files(".venv")
 
 
+def test_workspace_tools_exclude_environment_secrets(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=secret\n", encoding="utf-8")
+    (tmp_path / ".env.local").write_text("JUMA_API_TOKEN=secret\n", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        WorkspaceTools(tmp_path).read_file(".env")
+    with pytest.raises(ValueError):
+        WorkspaceTools(tmp_path).read_file(".env.local")
+    files = WorkspaceTools(tmp_path).list_files()["files"]
+    assert all(item not in {".env", ".env.local"} for item in files)
+
+
 def test_strict_function_schemas_require_all_declared_properties() -> None:
     for tool in WORKSPACE_TOOLS:
         properties = tool["parameters"]["properties"]

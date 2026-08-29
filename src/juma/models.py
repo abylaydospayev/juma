@@ -160,7 +160,11 @@ class OpenAIResponsesModel:
                 "question. Gather evidence first, then provide the requested report."
             )
 
-        workspace = WorkspaceTools(self.settings.resolved_workspace_root)
+        workspace = WorkspaceTools(
+            self.settings.resolved_workspace_root,
+            auto_setup_environment=self.settings.auto_setup_environment,
+            environment_timeout=self.settings.environment_timeout,
+        )
         if crew == "coding":
             preflight = self._workspace_preflight(request, workspace)
             if preflight:

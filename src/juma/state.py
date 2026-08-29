@@ -42,6 +42,7 @@ class PatchResult(TypedDict):
     repair_attempts: NotRequired[list[dict]]
     branch: NotRequired[str]
     commit: NotRequired[dict]
+    push: NotRequired[dict]
     test: NotRequired[dict]
     error: NotRequired[str]
 
