@@ -17,6 +17,7 @@ class AuditLog:
 
     def record(self, event: str, *, thread_id: str, **fields: Any) -> None:
         payload = {
+            "event_id": __import__("uuid").uuid4().hex,
             "timestamp": datetime.now(UTC).isoformat(),
             "event": event,
             "thread_id": thread_id,

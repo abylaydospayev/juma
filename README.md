@@ -15,7 +15,7 @@ actions.
 
 The current runtime includes:
 
-- OpenAI Responses API with `gpt-5.6-luna` by default.
+- OpenAI Responses API with the general reasoning model fixed to `gpt-5.6-luna`.
 - Structured routing with an inspectable crew, confidence, and reason.
 - Persistent conversation history in SQLite.
 - A bounded command loop that forms an inspectable plan, chooses practical defaults, and reports
@@ -32,19 +32,27 @@ The current runtime includes:
   rejected before approval.
 - Action fingerprints, approval interrupts, retries, and append-only local audit events.
 - CLI, Streamlit UI, and an MCP memory server.
+- Versioned asynchronous `/v1/runs` endpoints with replayable SSE events, idempotency keys,
+  cancellation, rollback, and inert suggestion acceptance.
+- Immutable changeset and guardrail contracts, scoped Global → Workspace → Thread context,
+  indexed outcomes, lexical line-addressed retrieval, benchmark and daemon skeletons, and a
+  digest-pinned disposable runner broker.
 
 ## Architecture
 
 ```text
-CLI or Streamlit UI
-        |
-        v
-Structured router --> one isolated crew --> safety gate --> durable result
-                            |                    |
-                            +--> memory          +--> SQLite checkpoint
-                            +--> web search
-                            +--> read-only workspace tools
-                            +--> validated patch --> tests --> rollback on failure
+Internet
+   |
+ Caddy (TLS :80/:443) -> GitHub OAuth allowlist -> Streamlit UI
+                                      |
+                                      v
+                               private FastAPI
+                                      |
+               router -> one isolated crew -> safety gate -> durable result
+                                      |                         |
+                                      +--> scoped context       +--> SQLite/WAL checkpoint
+                                      +--> read-only retrieval  +--> approved-job broker
+                                      +--> validated changeset -> disposable tests -> apply
 ```
 
 Crews never call each other. They communicate through the parent state, durable conversation
@@ -65,7 +73,6 @@ Create `.env` in the project root. It is excluded from Git:
 
 ```dotenv
 OPENAI_API_KEY=your-new-api-key
-JUMA_OPENAI_MODEL=gpt-5.6-luna
 JUMA_REASONING_EFFORT=medium
 JUMA_ENABLE_WEB_SEARCH=true
 JUMA_API_TOKEN=use-a-long-random-local-token
@@ -149,10 +156,10 @@ juma voice-transcribe .\request.wav
 juma voice-speak "Your request is complete." --output .\reply.mp3
 ```
 
-For private phone access through Tailscale, install Tailscale on the computer and phone, set
-`JUMA_SERVER_HOST=0.0.0.0`, and start the UI with `juma-ui --server.address 0.0.0.0`. Open
-`http://<computer-tailscale-ip>:8501` on the phone. Keep the computer awake and keep
-`JUMA_API_TOKEN` configured. The default server host remains `127.0.0.1`.
+For an always-on private deployment, use the included `compose.yaml`, Caddy, and GitHub
+OAuth proxy. The selected target is one Serverspace vStack Cloud server in New Jersey:
+Ubuntu 24.04.2 x64, 2 vCPU, 4 GB RAM, 80 GB SSD, and 200 Mbps. Only Caddy ports 80/443 are
+published; SSH is restricted to the administrator CIDR. Follow [`ops/deploy-runbook.md`](ops/deploy-runbook.md).
 
 ## MCP memory server
 
@@ -170,23 +177,24 @@ mcp dev src/juma/mcp_server.py --with-editable .
 
 ## Configuration
 
-`JUMA_DATA_DIR` moves the SQLite databases and audit log. Other optional settings are
-`JUMA_OPENAI_MODEL`, `JUMA_REASONING_EFFORT`, `JUMA_MAX_OUTPUT_TOKENS`,
+`JUMA_DATA_DIR` moves the SQLite databases and audit log. Juma's general reasoning model is
+fixed to `gpt-5.6-luna`; `JUMA_REASONING_EFFORT`, `JUMA_MAX_OUTPUT_TOKENS`,
 `JUMA_ENABLE_WEB_SEARCH`, `JUMA_MAX_TOOL_ROUNDS`, `JUMA_MAX_RETRIES`,
 `JUMA_REQUEST_TIMEOUT`, `JUMA_WORKSPACE_ROOT`, `JUMA_API_TOKEN`, `JUMA_VOICE_ENABLED`,
 `JUMA_VOICE_TRANSCRIPTION_MODEL`, `JUMA_VOICE_SPEECH_MODEL`, `JUMA_VOICE_NAME`,
 `JUMA_SERVER_HOST`, `JUMA_SERVER_PORT`, `JUMA_AUTO_SETUP`, `JUMA_ENVIRONMENT_TIMEOUT`,
+`JUMA_PRODUCTION`, `JUMA_WORKSPACE_ID`, `JUMA_API_MAX_BODY_BYTES`, `JUMA_RUNNER_TIMEOUT`,
+`JUMA_UI_API_URL`, `JUMA_UI_API_TOKEN`,
 `JUMA_AUTO_REPAIR`, `JUMA_MAX_REPAIR_ATTEMPTS`, `JUMA_AUTO_COMMIT`, `JUMA_AUTO_PUSH`, and
 `JUMA_PUSH_REMOTE`.
 
-Autonomous repair is off by default. To enable a bounded local repair-and-commit workflow, use a
-clean Git checkout and set `JUMA_AUTO_REPAIR=true`, `JUMA_MAX_REPAIR_ATTEMPTS=3`, and
-`JUMA_AUTO_COMMIT=true`. Juma creates a `juma/auto/<fingerprint>` branch, applies the approved
-patch, sends failing test output back to the coding crew, and retries only within the original file
-scope. It commits only after tests pass. Set `JUMA_AUTO_PUSH=true` to push that committed branch to
-`JUMA_PUSH_REMOTE` (default `origin`). Juma never force-pushes, pushes `main`, merges, or deploys.
-The remote must already be configured in Git. If the retry limit is reached, the failed patch
-remains available for fingerprint-protected rollback.
+Voice transcription and speech synthesis use their own specialist models when voice is enabled;
+the general reasoning path remains Luna-only. A non-Luna `JUMA_OPENAI_MODEL` value is rejected.
+
+Production mode is enabled by default. In production, a failed approved candidate is rolled back
+immediately; no repaired patch, commit, push, or deployment can happen without a new changeset and
+fresh approval. Legacy bounded local automation is available only for an explicit non-production
+checkout (`JUMA_PRODUCTION=false`).
 
 Checks normally use the project `.venv` or `venv` interpreter when one exists. Set
 `JUMA_AUTO_SETUP=true` when a project needs a fresh environment; Juma creates a temporary virtual

@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .guardrails import GuardrailReport, check_candidate_syntax, scan_patch
 from .workspace import WorkspaceTools, is_ignored_part
 
 
@@ -30,6 +31,7 @@ class PatchManager:
             auto_setup_environment=auto_setup_environment,
             environment_timeout=environment_timeout,
         )
+        self.last_guardrail_report: GuardrailReport | None = None
 
     @classmethod
     def cwd(cls) -> PatchManager:
@@ -125,6 +127,16 @@ class PatchManager:
         for relative_path in files:
             self._validate_path(relative_path)
         return self._file_hashes(files)
+
+    def base_git_tree(self) -> str | None:
+        try:
+            completed = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=self.root, capture_output=True,
+                text=True, timeout=10, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return completed.stdout.strip() if completed.returncode == 0 else None
 
     def commit(
         self,
@@ -355,6 +367,11 @@ class PatchManager:
                 "The patch mixes Git unified diff content with unsupported apply-patch markers."
             )
         files = self.files(patch)
+        report = scan_patch(patch, files)
+        self.last_guardrail_report = report
+        if report.status == "block":
+            detail = "; ".join(f"{item.code}: {item.message}" for item in report.findings)
+            raise PatchError(f"Guardrail preflight blocked the proposal: {detail}")
         try:
             completed = subprocess.run(
                 [
@@ -377,6 +394,13 @@ class PatchManager:
         if completed.returncode:
             detail = (completed.stderr or completed.stdout).strip()
             raise PatchError(f"Git rejected the patch: {detail}")
+        syntax_report = check_candidate_syntax(self.root, patch, files)
+        report.findings.extend(syntax_report.findings)
+        report.checks.extend(syntax_report.checks)
+        if syntax_report.status == "block":
+            report.status = "block"
+            detail = "; ".join(f"{item.code}: {item.message}" for item in syntax_report.findings)
+            raise PatchError(f"Guardrail preflight blocked the candidate: {detail}")
         return files
 
     def apply_and_test(self, patch: str) -> dict[str, Any]:

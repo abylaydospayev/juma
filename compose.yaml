@@ -1,0 +1,94 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      JUMA_SERVER_HOST: 0.0.0.0
+      JUMA_SERVER_PORT: 8000
+      JUMA_PRODUCTION: "true"
+      JUMA_OPENAI_MODEL: gpt-5.6-luna
+      JUMA_DATA_DIR: /var/lib/juma/data
+      JUMA_WORKSPACE_ROOT: /var/lib/juma/workspace
+    secrets: [openai_api_key, juma_api_token, backup_password]
+    volumes:
+      - juma-data:/var/lib/juma/data
+      - juma-workspace:/var/lib/juma/workspace
+    expose: ["8000"]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  ui:
+    build: {context: ., dockerfile: Dockerfile}
+    restart: unless-stopped
+    env_file: .env
+    command: [streamlit, run, src/juma/ui.py, --server.address=0.0.0.0, --server.port=8501, --server.headless=true]
+    environment:
+      JUMA_SERVER_HOST: api
+      JUMA_SERVER_PORT: 8000
+      JUMA_UI_API_URL: http://api:8000
+      JUMA_OPENAI_MODEL: gpt-5.6-luna
+      JUMA_UI_API_TOKEN_FILE: /run/secrets/juma_api_token
+    depends_on:
+      api: {condition: service_healthy}
+    secrets: [juma_api_token]
+    expose: ["8501"]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.12.0
+    restart: unless-stopped
+    env_file: .env
+    command: ["--http-address=0.0.0.0:4180", "--upstream=http://ui:8501", "--provider=github", "--github-user=${JUMA_GITHUB_USERNAME}", "--email-domain=*", "--reverse-proxy=true", "--set-xauthrequest=true"]
+    secrets: [oauth_client_id, oauth_client_secret, oauth_cookie_secret]
+    expose: ["4180"]
+    depends_on: [ui]
+
+  caddy:
+    image: caddy:2.10.0-alpine
+    restart: unless-stopped
+    env_file: .env
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./ops/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [oauth2-proxy]
+
+  broker:
+    build: {context: ., dockerfile: Dockerfile}
+    restart: unless-stopped
+    command: [python, -m, juma.runner]
+    volumes:
+      - juma-jobs:/srv/juma/jobs
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
+volumes:
+  juma-data:
+  juma-workspace:
+  juma-jobs:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  openai_api_key: {file: ./secrets/openai_api_key}
+  juma_api_token: {file: ./secrets/juma_api_token}
+  backup_password: {file: ./secrets/backup_password}
+  oauth_client_id: {file: ./secrets/oauth_client_id}
+  oauth_client_secret: {file: ./secrets/oauth_client_secret}
+  oauth_cookie_secret: {file: ./secrets/oauth_cookie_secret}

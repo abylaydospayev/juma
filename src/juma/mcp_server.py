@@ -26,6 +26,11 @@ class MemoryRecord(TypedDict):
     content: str
     metadata: dict[str, Any]
     created_at: str
+    scope_type: str
+    scope_id: str
+    visibility: str
+    memory_kind: str
+    status: str
 
 
 def _store() -> MemoryStore:
@@ -35,22 +40,34 @@ def _store() -> MemoryStore:
 
 
 @mcp.tool()
-def remember(crew: str, content: str, scope: str = "shared") -> RememberResult:
+def remember(
+    crew: str,
+    content: str,
+    scope: str = "shared",
+    workspace_id: str | None = None,
+    thread_id: str | None = None,
+) -> RememberResult:
     """Store a memory for a juma crew."""
     store = _store()
     try:
-        memory_id = store.remember(crew, content, scope=scope)
+        memory_id = store.remember(crew, content, scope=scope, workspace_id=workspace_id, thread_id=thread_id)
         return {"id": memory_id, "stored": True}
     finally:
         store.close()
 
 
 @mcp.tool()
-def search_memory(query: str, crew: str | None = None, limit: int = 10) -> list[MemoryRecord]:
+def search_memory(
+    query: str,
+    crew: str | None = None,
+    limit: int = 10,
+    workspace_id: str | None = None,
+    thread_id: str | None = None,
+) -> list[MemoryRecord]:
     """Search memories visible to a crew."""
     store = _store()
     try:
-        return store.search(query, crew=crew, limit=limit)
+        return store.search(query, crew=crew, limit=limit, workspace_id=workspace_id, thread_id=thread_id)
     finally:
         store.close()
 

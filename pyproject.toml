@@ -34,6 +34,7 @@ juma = "juma.cli:app"
 juma-mcp = "juma.mcp_server:main"
 juma-server = "juma.server:main"
 juma-ui = "juma.ui:launch"
+juma-broker = "juma.runner:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/juma"]

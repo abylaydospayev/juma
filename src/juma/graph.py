@@ -6,6 +6,8 @@ from langgraph.graph import END, START, StateGraph
 
 from .actions import patch_action
 from .config import Settings
+from .context import ContextService
+from .journal import ExecutorJournal
 from .crews import build_admin_crew, build_coding_crew, build_research_crew
 from .memory import MemoryStore
 from .models import JumaModelError, ModelClient
@@ -22,6 +24,8 @@ def build_graph(
     memory: MemoryStore | None = None,
     patch_manager: PatchManager | None = None,
     settings: Settings | None = None,
+    context: ContextService | None = None,
+    journal: ExecutorJournal | None = None,
 ):
     patch_manager = patch_manager or PatchManager(Path.cwd())
     crews = {
@@ -31,15 +35,25 @@ def build_graph(
     }
 
     def invoke_crew(name: str, state: JumaState) -> dict:
-        memory_context = (
-            memory.search(state["request"], crew=name, limit=6) if memory is not None else []
+        bundle = (
+            context.get_context(
+                state["request"],
+                settings.workspace_id if settings else "default",
+                state.get("thread_id", "default"),
+                name,
+                token_budget=1200,
+            )
+            if context is not None
+            else None
         )
+        memory_context = (bundle or {}).get("memories", [])[:6]
         # Reducer-backed fields must cross a subgraph boundary as deltas. Passing an
         # empty event list prevents the child from echoing the parent's history.
         result = crews[name].invoke({**state, "memory_context": memory_context, "events": []})
         return {
             "response": result["response"],
             "proposed_action": result.get("proposed_action"),
+            "context_bundle": bundle,
             "events": result.get("events", []),
         }
 
@@ -68,8 +82,38 @@ def build_graph(
             return {}
         events = []
         branch: str | None = None
+        expected_hashes = (action.get("parameters") or {}).get("expected_file_hashes")
+        expected_tree = (action.get("parameters") or {}).get("base_git_tree")
+        stale = bool(expected_tree and patch_manager.base_git_tree() != expected_tree)
+        if isinstance(expected_hashes, dict):
+            current_hashes = patch_manager.file_hashes(list(expected_hashes))
+            stale = stale or current_hashes != expected_hashes
+        if stale:
+            return {
+                "response": state["response"] + " The approved patch is stale; workspace hashes changed.",
+                "proposed_action": action,
+                "patch_result": {
+                    "status": "apply_failed",
+                    "files": list(expected_hashes or {}),
+                    "error": "Stale workspace preconditions.",
+                },
+                "rollback_available": False,
+                "status": "failed",
+                "events": [{"source": "guardrails", "message": "Stale workspace preconditions rejected the patch."}],
+            }
+        journal_id = None
+        if journal is not None:
+            journal_id = journal.begin(
+                str(state.get("run_id", "unknown")),
+                str(action.get("fingerprint", "unknown")),
+                {"expected_file_hashes": expected_hashes or {}},
+            )
+        # Production never mutates a second time after approval.  Legacy local
+        # automation remains available only when explicitly opting out of production.
         autonomous = bool(
-            settings and (settings.auto_repair or settings.auto_commit or settings.auto_push)
+            settings
+            and not settings.production_mode
+            and (settings.auto_repair or settings.auto_commit or settings.auto_push)
         )
         if autonomous:
             branch_result = patch_manager.prepare_autonomous_branch(action.get("fingerprint", ""))
@@ -105,6 +149,7 @@ def build_graph(
         if (
             result["status"] == "applied_tests_failed"
             and settings
+            and not settings.production_mode
             and settings.auto_repair
             and settings.max_repair_attempts > 0
         ):
@@ -119,9 +164,26 @@ def build_graph(
             )
             events.extend(repair_events)
 
+        if settings and settings.production_mode and result["status"] == "applied_tests_failed":
+            # A failed candidate must not remain persisted in the hosted workspace.
+            # Rollback is hash-bound and uses the executor's observed hashes.
+            undone = patch_manager.rollback(
+                action["patch"],
+                expected_post_apply_hashes=result.get("post_apply_hashes"),
+                expected_pre_apply_hashes=result.get("pre_apply_hashes"),
+            )
+            result["rollback"] = undone
+            if undone["status"] == "rolled_back":
+                result["status"] = "rolled_back"
+                result["error"] = "Post-change checks failed; the candidate was rolled back."
+            else:
+                result["status"] = "rollback_failed"
+                result["error"] = undone.get("error", "Automatic rollback failed.")
+
         if (
             result["status"] == "applied_tests_passed"
             and settings
+            and not settings.production_mode
             and settings.auto_commit
         ):
             commit = patch_manager.commit(
@@ -191,14 +253,16 @@ def build_graph(
             elif result.get("push", {}).get("status") == "push_failed":
                 response += f" Automatic push failed: {result['push']['error']}"
             status = "completed"
-        elif result["status"] == "applied_tests_failed":
+        elif result["status"] in {"applied_tests_failed", "rolled_back", "rollback_failed"}:
             response = (
                 state["response"]
-                + " The approved patch was applied, but the post-change tests failed. "
-                "Automatic repair did not reach a passing test run. You can roll it back "
-                "from the UI."
+                + " The approved patch did not pass post-change tests. "
             )
-            status = "completed"
+            if result["status"] == "rolled_back":
+                response += "It was automatically rolled back and no persistent change remains."
+            else:
+                response += "Rollback requires operator intervention because the workspace changed."
+            status = "failed"
         else:
             response = state["response"] + f" The patch could not be applied: {result['error']}"
             status = "failed"
@@ -208,6 +272,8 @@ def build_graph(
                 "message": f"Patch result: {result['status']}.",
             }
         )
+        if journal_id and journal is not None:
+            journal.finish(journal_id, status=result["status"], observed_after=result)
         return {
             "response": response,
             "proposed_action": final_action,

@@ -3,6 +3,11 @@ from __future__ import annotations
 import subprocess
 import sys
 import uuid
+import json
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -12,7 +17,75 @@ import streamlit as st
 from juma.identity import CREATOR_NAME, JUMA_NAME, TAGLINE
 from juma.models import JumaModelError
 from juma.service import Juma
+from juma.config import Settings
 from juma.voice import VoiceError, VoiceService
+
+
+class ApiClient:
+    """Small hosted-mode client; the Streamlit process never opens Juma SQLite files."""
+
+    def __init__(self, base_url: str, token: str):
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.settings = Settings.from_env()
+
+    def _request(self, method: str, path: str, payload: dict | None = None) -> dict | list:
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        request = urllib.request.Request(
+            self.base_url + path,
+            data=body,
+            method=method,
+            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Hosted Juma API request failed: {exc}") from exc
+
+    def ask(self, request: str, *, thread_id: str | None = None) -> dict:
+        return self._request("POST", "/ask", {"request": request, "thread_id": thread_id})  # type: ignore[return-value]
+
+    def resume(self, thread_id: str, *, approved: bool, feedback: str = "", action_fingerprint: str | None = None) -> dict:
+        path = f"/threads/{thread_id}/{'approve' if approved else 'reject'}"
+        return self._request("POST", path, {"feedback": feedback, "action_fingerprint": action_fingerprint})  # type: ignore[return-value]
+
+    def rollback(self, thread_id: str, *, action_fingerprint: str | None = None) -> dict:
+        return self._request("POST", f"/threads/{thread_id}/rollback", {"action_fingerprint": action_fingerprint})  # type: ignore[return-value]
+
+    def history(self, thread_id: str, *, limit: int = 100) -> list[dict]:
+        return self._request("GET", f"/threads/{thread_id}/history?limit={limit}")  # type: ignore[return-value]
+
+    def threads(self, *, limit: int = 40) -> list[dict]:
+        return self._request("GET", f"/threads?limit={limit}")  # type: ignore[return-value]
+
+    def remember(self, crew: str, content: str, *, scope: str = "shared") -> int:
+        result = self._request("POST", "/memories", {"crew": crew, "content": content, "scope": scope})
+        return int(result.get("id", 0)) if isinstance(result, dict) else 0
+
+    def search_memories(self, query: str) -> list[dict]:
+        result = self._request("GET", "/memories?query=" + urllib.parse.quote(query))
+        return result.get("memories", []) if isinstance(result, dict) else []
+
+    def preference_values(self) -> dict[str, str]:
+        result = self._request("GET", "/preferences")
+        return {item["key"]: item["value"] for item in result} if isinstance(result, list) else {}
+
+    def set_preference(self, key: str, value: str) -> dict:
+        return self._request("PUT", f"/preferences/{key}", {"value": value})  # type: ignore[return-value]
+
+    def close(self) -> None:
+        return None
+
+
+def runtime_client() -> Any:
+    hosted_url = os.getenv("JUMA_UI_API_URL")
+    if hosted_url:
+        token = os.getenv("JUMA_UI_API_TOKEN") or os.getenv("JUMA_API_TOKEN", "")
+        if not token:
+            raise RuntimeError("JUMA_UI_API_TOKEN is required for hosted UI mode.")
+        return ApiClient(hosted_url, token)
+    return Juma()
 
 
 def normalize_display_text(text: str) -> str:
@@ -57,7 +130,7 @@ def initialize() -> None:
     if "thread_id" not in st.session_state:
         st.session_state.thread_id = str(uuid.uuid4())
     if "juma" not in st.session_state:
-        st.session_state.juma = Juma()
+        st.session_state.juma = runtime_client()
     if "messages" not in st.session_state:
         st.session_state.messages = load_messages(st.session_state.thread_id)
 
@@ -200,7 +273,7 @@ def rollback_patch(index: int) -> None:
 
 def reset_chat() -> None:
     st.session_state.juma.close()
-    st.session_state.juma = Juma()
+    st.session_state.juma = runtime_client()
     st.session_state.thread_id = str(uuid.uuid4())
     st.session_state.messages = []
     st.rerun()
@@ -245,7 +318,7 @@ def sidebar() -> None:
         st.subheader("Shared memory")
         query = st.text_input("Search memories", placeholder="e.g. router")
         if query:
-            memories = st.session_state.juma.memory.search(query, scope="shared", limit=8)
+            memories = st.session_state.juma.search_memories(query) if hasattr(st.session_state.juma, "search_memories") else st.session_state.juma.memory.search(query, scope="shared", limit=8)
             if memories:
                 for memory in memories:
                     with st.container(border=True):
@@ -348,7 +421,7 @@ def app() -> None:
                 st.warning(str(error))
         st.session_state.messages.append(assistant_message)
         st.rerun()
-    except JumaModelError as error:
+    except (JumaModelError, ValueError) as error:
         st.error(f"Model error: {error}")
 
 

@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 from openai import OpenAI
 
-from .config import Settings
+from .config import JUMA_OPENAI_MODEL, Settings
 from .identity import JUMA_IDENTITY
 from .patches import PatchManager
 from .state import AgentName, ProposedAction
@@ -298,7 +298,9 @@ class OpenAIResponsesModel:
         text_format: dict[str, Any] | None = None,
     ) -> Any:
         arguments: dict[str, Any] = {
-            "model": self.settings.openai_model,
+            # Keep the provider request pinned even if a non-standard caller
+            # supplies a Settings-like object that bypasses Settings validation.
+            "model": JUMA_OPENAI_MODEL,
             "instructions": instructions,
             "input": input,
             "reasoning": {"effort": self.settings.openai_reasoning_effort},

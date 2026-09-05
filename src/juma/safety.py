@@ -38,7 +38,10 @@ def approval_gate(state: JumaState) -> dict[str, Any]:
     else:
         approved = bool(decision.get("approved", False))
         feedback = str(decision.get("feedback", ""))
-    if action.get("kind") == "code.patch":
+    executable_kinds = {"code.patch", "filesystem.delete", "check.run"}
+    # Rejections are intentionally not fingerprint-bound: a reviewer can reject a
+    # stale or malformed proposal without first copying a hash from the preview.
+    if approved and action.get("kind") in executable_kinds:
         supplied_fingerprint = (
             decision.get("action_fingerprint") if isinstance(decision, dict) else None
         )
@@ -51,7 +54,7 @@ def approval_gate(state: JumaState) -> dict[str, Any]:
                 },
                 "response": state["response"]
                 + " The approval was rejected because it did not match the exact "
-                "patch fingerprint.",
+                "action fingerprint.",
                 "status": "rejected",
                 "events": [{"source": "safety", "message": "Patch fingerprint mismatch."}],
             }
@@ -60,7 +63,7 @@ def approval_gate(state: JumaState) -> dict[str, Any]:
         if action.get("kind") == "code.patch":
             suffix = " The patch was approved and will be applied with tests now."
         else:
-            suffix = " The action was approved; execution awaits a configured tool adapter."
+            suffix = " The action was approved, but no production adapter is configured; no state was changed."
         return {
             "approval": {
                 "approved": True,
@@ -68,7 +71,7 @@ def approval_gate(state: JumaState) -> dict[str, Any]:
                 "action_fingerprint": action.get("fingerprint"),
             },
             "response": state["response"] + suffix,
-            "status": "completed",
+            "status": "succeeded" if action.get("kind") == "code.patch" else "failed",
             "events": [{"source": "safety", "message": "Action approved."}],
         }
     suffix = " The action was rejected."

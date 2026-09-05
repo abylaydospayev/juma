@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .environment import ProjectEnvironment
+from .retrieval import RetrievalService
 
 IGNORED_PARTS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "data"}
 MAX_READ_BYTES = 200_000
@@ -16,6 +17,18 @@ def is_ignored_part(part: str) -> bool:
 
 
 WORKSPACE_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "name": "retrieve_context",
+        "description": "Return up to five bounded, line-addressed lexical snippets for a query.",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
     {
         "type": "function",
         "name": "list_files",
@@ -86,6 +99,7 @@ class WorkspaceTools:
             auto_setup=auto_setup_environment,
             timeout=environment_timeout,
         )
+        self.retrieval = RetrievalService(self.root)
 
     def _safe_path(self, relative_path: str) -> Path:
         candidate = (self.root / (relative_path or ".")).resolve()
@@ -178,12 +192,18 @@ class WorkspaceTools:
             "environment": environment,
         }
 
+    def retrieve_context(self, query: str) -> dict[str, Any]:
+        if not query or len(query) > 500:
+            raise ValueError("Retrieval queries must contain 1 to 500 characters.")
+        return self.retrieval.retrieve(query)
+
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         handlers = {
             "list_files": self.list_files,
             "read_file": self.read_file,
             "search_files": self.search_files,
             "run_checks": self.run_checks,
+            "retrieve_context": self.retrieve_context,
         }
         if name not in handlers:
             raise ValueError(f"Unknown workspace tool: {name}")

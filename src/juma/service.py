@@ -14,12 +14,17 @@ from langgraph.types import Command
 from .audit import AuditLog
 from .config import Settings
 from .conversation import ConversationStore
+from .context import ContextService
+from .changeset_store import ChangesetStore
+from .changeset import Changeset
+from .journal import ExecutorJournal
 from .graph import build_graph
 from .locking import CrossProcessLock, LockBusyError
 from .memory import MemoryStore
 from .models import ModelClient, OpenAIResponsesModel
 from .patches import PatchManager
 from .preferences import PreferenceStore
+from .outcomes import OutcomeStore
 from .router import route_request
 
 
@@ -38,6 +43,10 @@ class Juma:
         self.memory = MemoryStore(self.settings.memory_db)
         self.conversations = ConversationStore(self.settings.data_dir / "conversations.sqlite")
         self.preferences = PreferenceStore(self.settings.preferences_db)
+        self.context = ContextService(self.memory, self.preferences)
+        self.outcomes = OutcomeStore(self.settings.data_dir / "outcomes.sqlite")
+        self.changesets = ChangesetStore(self.settings.data_dir / "changesets.sqlite")
+        self.journal = ExecutorJournal(self.settings.data_dir / "executor-journal.sqlite")
         self.audit = AuditLog(self.settings.audit_log)
         self.patch_manager = PatchManager(
             self.settings.resolved_workspace_root,
@@ -50,6 +59,8 @@ class Juma:
             self.memory,
             self.patch_manager,
             settings=self.settings,
+            context=self.context,
+            journal=self.journal,
         )
 
     @staticmethod
@@ -100,8 +111,15 @@ class Juma:
             return self._execution_guard(thread_id)
         return self._thread_guard(thread_id)
 
-    def ask(self, request: str, *, thread_id: str | None = None) -> dict[str, Any]:
+    def ask(
+        self,
+        request: str,
+        *,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
         thread_id = thread_id or str(uuid.uuid4())
+        run_id = run_id or str(uuid.uuid4())
         with self._request_guard(request, thread_id):
             history = self.conversations.history(thread_id, limit=20)
             self.audit.record(
@@ -120,6 +138,9 @@ class Juma:
                         "rollback_available": False,
                         "approval": None,
                         "user_preferences": self.preferences.all(),
+                        "thread_id": thread_id,
+                        "run_id": run_id,
+                        "workspace_id": self.settings.workspace_id,
                         "conversation_history": [
                             {
                                 "role": item["role"],
@@ -136,6 +157,14 @@ class Juma:
             except Exception as exc:
                 self.audit.record("run_failed", thread_id=thread_id, error=type(exc).__name__)
                 raise
+            if result.get("changeset"):
+                try:
+                    persisted = self.changesets.create(Changeset.model_validate(result["changeset"]))
+                    result["changeset"] = persisted.model_dump(mode="json")
+                except (ValueError, TypeError):
+                    # The legacy action remains available for compatibility even
+                    # if a malformed optional changeset cannot be indexed.
+                    self.audit.record("changeset_persist_failed", thread_id=thread_id)
             envelope = self._envelope(thread_id, result)
             self.conversations.append(thread_id, "user", request)
             self.conversations.append(
@@ -154,6 +183,14 @@ class Juma:
                 thread_id=thread_id,
                 status=envelope["status"],
                 agent=result.get("target_agent"),
+                usage=getattr(self.model, "last_usage", {}),
+            )
+            self.outcomes.record(
+                run_id=run_id,
+                thread_id=thread_id,
+                workspace_id=self.settings.workspace_id,
+                result_code=envelope["status"],
+                crew=result.get("target_agent"),
                 usage=getattr(self.model, "last_usage", {}),
             )
             return envelope
@@ -186,7 +223,11 @@ class Juma:
                     return self._envelope_from_state(thread_id, state)
                 raise ValueError(f"Thread {thread_id!r} is not waiting for approval.")
             pending_action = state.get("proposed_action") or {}
-            if pending_action.get("kind") == "code.patch":
+            if approved and pending_action.get("kind") in {
+                "code.patch",
+                "filesystem.delete",
+                "check.run",
+            }:
                 expected_fingerprint = pending_action.get("fingerprint")
                 if not (
                     isinstance(action_fingerprint, str)
@@ -194,8 +235,7 @@ class Juma:
                     and hmac.compare_digest(action_fingerprint, expected_fingerprint)
                 ):
                     raise ValueError(
-                        "This patch approval requires the exact action fingerprint "
-                        "shown in the preview."
+                        "This approval requires the exact action fingerprint shown in the preview."
                     )
             self.audit.record(
                 "approval_decision",
@@ -230,6 +270,14 @@ class Juma:
                 "run_finished",
                 thread_id=thread_id,
                 status=envelope["status"],
+                usage=getattr(self.model, "last_usage", {}),
+            )
+            self.outcomes.record(
+                run_id=str(state.get("run_id") or uuid.uuid5(uuid.NAMESPACE_URL, thread_id)),
+                thread_id=thread_id,
+                workspace_id=self.settings.workspace_id,
+                result_code=envelope["status"],
+                crew=result.get("target_agent"),
                 usage=getattr(self.model, "last_usage", {}),
             )
             return envelope
@@ -352,6 +400,7 @@ class Juma:
             "events": state.get("events", []),
             "interrupt": None,
             "action": state.get("proposed_action"),
+            "changeset": state.get("changeset"),
             "patch_result": state.get("patch_result"),
             "rollback_available": state.get("rollback_available", False),
             "route_confidence": state.get("route_confidence"),
@@ -376,6 +425,9 @@ class Juma:
         self.conversations.close()
         self.memory.close()
         self.preferences.close()
+        self.outcomes.close()
+        self.changesets.close()
+        self.journal.close()
         self._checkpoint_connection.close()
 
     def __enter__(self) -> Juma:

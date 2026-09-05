@@ -30,12 +30,24 @@ def make_action(
     return {**payload, "fingerprint": fingerprint}  # type: ignore[return-value]
 
 
-def patch_action(request: str, patch: str, files: list[str]) -> ProposedAction:
+def patch_action(
+    request: str,
+    patch: str,
+    files: list[str],
+    *,
+    expected_file_hashes: dict[str, str | None] | None = None,
+    base_git_tree: str | None = None,
+) -> ProposedAction:
+    parameters: dict[str, Any] = {"files": files}
+    if expected_file_hashes is not None:
+        parameters["expected_file_hashes"] = expected_file_hashes
+    if base_git_tree:
+        parameters["base_git_tree"] = base_git_tree
     return make_action(
         "code.patch",
         f"Apply the proposed patch for: {request}",
         "medium",
-        parameters={"files": files},
+        parameters=parameters,
         patch=patch,
     )
 

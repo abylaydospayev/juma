@@ -9,11 +9,15 @@ from rich.console import Console
 from rich.json import JSON
 
 from .config import Settings
+from .bench import run_benchmark
+from .daemon import run_once
 from .models import JumaModelError
 from .service import Juma
 from .voice import VoiceError, VoiceService
 
 app = typer.Typer(name="juma", help="A small hierarchical multi-agent runtime.")
+daemon_app = typer.Typer(help="Run idempotent maintenance tasks.")
+app.add_typer(daemon_app, name="daemon")
 console = Console()
 
 
@@ -138,6 +142,40 @@ def preferences_command() -> None:
     """Show Juma's durable user preferences."""
     with Juma() as juma:
         show({"preferences": juma.preference_values()})
+
+
+@app.command()
+def status() -> None:
+    """Show recent durable threads and service configuration status."""
+    with Juma() as juma:
+        show({"workspace": str(juma.patch_manager.root), "threads": juma.threads(limit=20)})
+
+
+@app.command()
+def watch(thread: Annotated[str, typer.Argument(help="Thread or run to inspect.")]) -> None:
+    """Print the current durable state once (safe for cron and shell scripts)."""
+    with Juma() as juma:
+        history = juma.history(thread, limit=100)
+        show({"thread_id": thread, "history": history})
+
+
+@app.command()
+def bench(
+    fixtures: Annotated[Path, typer.Option(help="Offline fixture directory.")] = Path("bench/fixtures"),
+    repetitions: Annotated[int, typer.Option(min=1, max=100)] = 1,
+    live: Annotated[bool, typer.Option(help="Enable explicitly cost-capped live mode.")] = False,
+    max_cost_usd: Annotated[float | None, typer.Option(help="Required in live mode.")] = None,
+) -> None:
+    """Run the deterministic offline benchmark skeleton."""
+    show(run_benchmark(fixtures, repetitions=repetitions, live=live, max_cost_usd=max_cost_usd))
+
+
+@daemon_app.command("run-once")
+def daemon_run_once(
+    data_dir: Annotated[Path | None, typer.Option(help="Runtime data directory.")] = None,
+) -> None:
+    """Run one idempotent semantic/integrity/backup/briefing cycle."""
+    show(run_once(data_dir or Settings.from_env().data_dir))
 
 
 @app.command("preference-set")
