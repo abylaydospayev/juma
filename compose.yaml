@@ -79,20 +79,8 @@ services:
       - caddy-config:/config
     depends_on: [oauth2-proxy]
 
-  broker:
-    build: {context: ., dockerfile: Dockerfile}
-    restart: unless-stopped
-    command: [python, -m, juma.runner]
-    volumes:
-      - juma-jobs:/srv/juma/jobs
-    read_only: true
-    tmpfs: [/tmp]
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-
 volumes:
   juma-data:
-  juma-jobs:
   caddy-data:
   caddy-config:
 

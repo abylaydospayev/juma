@@ -25,4 +25,5 @@
    is two hours.
 
 Container images must be digest-pinned in production. Keep automatic repair, commit, push,
-deployment, arbitrary shell execution, and destructive cleanup disabled.
+deployment, arbitrary shell execution, and destructive cleanup disabled. The disposable runner
+broker is host-side and is not exposed as a Docker service until its API integration is enabled.
