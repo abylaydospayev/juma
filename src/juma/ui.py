@@ -81,7 +81,15 @@ class ApiClient:
 def runtime_client() -> Any:
     hosted_url = os.getenv("JUMA_UI_API_URL")
     if hosted_url:
-        token = os.getenv("JUMA_UI_API_TOKEN") or os.getenv("JUMA_API_TOKEN", "")
+        token = os.getenv("JUMA_UI_API_TOKEN", "").strip()
+        if not token:
+            token_file = os.getenv("JUMA_UI_API_TOKEN_FILE", "")
+            if token_file:
+                try:
+                    token = Path(token_file).read_text(encoding="utf-8").strip()
+                except OSError:
+                    token = ""
+        token = token or os.getenv("JUMA_API_TOKEN", "").strip()
         if not token:
             raise RuntimeError("JUMA_UI_API_TOKEN is required for hosted UI mode.")
         return ApiClient(hosted_url, token)
