@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Juma backup every six hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:00:00
+Persistent=true
+Unit=juma-backup.service
+
+[Install]
+WantedBy=timers.target

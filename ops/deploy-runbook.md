@@ -17,9 +17,12 @@
    Never mount the Docker socket into Juma containers.
 5. Verify `curl -fsS https://<JUMA_FQDN>/health` and `/ready`, then smoke-test ask → approval →
    disposable check → apply. Confirm unauthenticated and non-allowlisted requests fail.
-6. Run migrations with the API stopped, health-gate the new stack, and restore the previous
-   image/config if readiness fails. Schedule `ops/backup.sh` every six hours; verify a restore
-   monthly. Target RPO is six hours and RTO is two hours.
+6. Configure `RESTIC_REPOSITORY` and `AWS_DEFAULT_REGION=auto` in `.env`. Create
+   `secrets/backup_s3_access_key` and `secrets/backup_s3_secret_key` with mode 0600, install
+   Restic, initialize the repository once, and install `ops/juma-backup.service` and
+   `ops/juma-backup.timer` into `/etc/systemd/system`. Create `backup-stage` writable by
+   container UID 10001. Verify a backup and restore monthly. Target RPO is six hours and RTO
+   is two hours.
 
 Container images must be digest-pinned in production. Keep automatic repair, commit, push,
 deployment, arbitrary shell execution, and destructive cleanup disabled.

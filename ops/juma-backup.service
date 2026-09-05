@@ -1,0 +1,9 @@
+[Unit]
+Description=Juma encrypted SQLite backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/juma
+ExecStart=/opt/juma/ops/backup.sh

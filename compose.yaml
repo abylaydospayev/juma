@@ -16,6 +16,7 @@ services:
     volumes:
       - juma-data:/var/lib/juma/data
       - ./workspace:/var/lib/juma/workspace
+      - ./backup-stage:/var/lib/juma/backup-stage
     expose: ["8000"]
     read_only: true
     tmpfs: [/tmp]
