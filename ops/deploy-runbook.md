@@ -6,7 +6,10 @@
 2. Allow TCP 80/443 publicly and TCP 22 only from `JUMA_ADMIN_SSH_CIDR`; keep 4180,
    8000, and 8501 private. Apply unattended security updates and configure a host firewall.
 3. Install pinned Docker Engine/Compose, clone this repository to `/opt/juma`, and create
-   the six files under `secrets/` with mode 0600. Register the GitHub OAuth app with callback
+   the six files under `secrets/` with mode 0600. The OAuth client ID is also set as the
+   non-secret `OAUTH2_PROXY_CLIENT_ID` value in `.env`; the client secret file must contain
+   only the secret (without a trailing newline), and the cookie secret file must contain
+   exactly 32 random bytes. Register the GitHub OAuth app with callback
    `https://<JUMA_FQDN>/oauth2/callback` and allow only `JUMA_GITHUB_USERNAME`.
 4. Copy `.env.example` to `.env`, set the FQDN and OAuth values, then run
    `docker compose build --pull` and `docker compose up -d`. Never mount the Docker socket

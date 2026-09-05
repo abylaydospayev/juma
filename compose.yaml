@@ -51,7 +51,18 @@ services:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.12.0
     restart: unless-stopped
     env_file: .env
-    command: ["--http-address=0.0.0.0:4180", "--upstream=http://ui:8501", "--provider=github", "--github-user=${JUMA_GITHUB_USERNAME}", "--email-domain=*", "--reverse-proxy=true", "--set-xauthrequest=true"]
+    command:
+      - --http-address=0.0.0.0:4180
+      - --upstream=http://ui:8501
+      - --provider=github
+      - --client-id=${OAUTH2_PROXY_CLIENT_ID}
+      - --client-secret-file=/run/secrets/oauth_client_secret
+      - --cookie-secret-file=/run/secrets/oauth_cookie_secret
+      - --redirect-url=${OAUTH2_PROXY_REDIRECT_URL}
+      - --github-user=${JUMA_GITHUB_USERNAME}
+      - --email-domain=*
+      - --reverse-proxy=true
+      - --set-xauthrequest=true
     secrets: [oauth_client_id, oauth_client_secret, oauth_cookie_secret]
     expose: ["4180"]
     depends_on: [ui]
