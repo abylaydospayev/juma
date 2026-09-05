@@ -11,9 +11,10 @@
    only the secret (without a trailing newline), and the cookie secret file must contain
    exactly 32 random bytes. Register the GitHub OAuth app with callback
    `https://<JUMA_FQDN>/oauth2/callback` and allow only `JUMA_GITHUB_USERNAME`.
-4. Copy `.env.example` to `.env`, set the FQDN and OAuth values, then run
-   `docker compose build --pull` and `docker compose up -d`. Never mount the Docker socket
-   into Juma containers.
+4. Copy `.env.example` to `.env`, set the FQDN and OAuth values, and create a separate Git
+   repository under `/opt/juma/workspace` for Juma to manage. Make that workspace writable by
+   container UID 10001. Then run `docker compose build --pull` and `docker compose up -d`.
+   Never mount the Docker socket into Juma containers.
 5. Verify `curl -fsS https://<JUMA_FQDN>/health` and `/ready`, then smoke-test ask → approval →
    disposable check → apply. Confirm unauthenticated and non-allowlisted requests fail.
 6. Run migrations with the API stopped, health-gate the new stack, and restore the previous

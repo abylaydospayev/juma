@@ -15,7 +15,7 @@ services:
     secrets: [openai_api_key, juma_api_token, backup_password]
     volumes:
       - juma-data:/var/lib/juma/data
-      - juma-workspace:/var/lib/juma/workspace
+      - ./workspace:/var/lib/juma/workspace
     expose: ["8000"]
     read_only: true
     tmpfs: [/tmp]
@@ -91,7 +91,6 @@ services:
 
 volumes:
   juma-data:
-  juma-workspace:
   juma-jobs:
   caddy-data:
   caddy-config:
